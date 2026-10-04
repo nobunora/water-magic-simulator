@@ -71,7 +71,7 @@ def finalize_regular_netcdf_result(
         "max_depth_summary": diagnostics,
         "grid_level_summary": {f"{source.block_size_m:g}m": diagnostics["active_cells"]},
         "depth_legend": depth_legend_metadata(
-            diagnostics["min_visible_depth_m"], diagnostics["global_max_depth_m"]
+            min(diagnostics["min_visible_depth_m"], diagnostics["global_max_depth_m"]), diagnostics["global_max_depth_m"]
         ),
         "elevation_legend": elevation_legend_metadata(
             diagnostics["terrain_min_elevation_m"],

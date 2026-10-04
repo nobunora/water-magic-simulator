@@ -1,0 +1,89 @@
+{
+  "revision": "2026-10-03-volume-expansion",
+  "clips": [
+    {
+      "spell_id": "dq7-maelstrom",
+      "file": "Ik652uO2Ncs.mp4",
+      "source": "https://www.youtube.com/watch?v=Ik652uO2Ncs",
+      "title": "歴代ドラゴンクエストシリーズ コーラルレイン&メイルストロム系総集編",
+      "channel": "カオゲCh",
+      "source_kind": "community-gameplay",
+      "rights_holder": "Square Enix",
+      "start_seconds": 55.5,
+      "end_seconds": 59.8,
+      "still_seconds": 58,
+      "review": "DQ VII Reimagined segment of the series spell compilation",
+      "caption": "ゲーム映像から抽出。範囲・水量はこの演出からの推定です。"
+    },
+    {
+      "spell_id": "ff6-flood",
+      "file": "YbrP10396f4.mp4",
+      "source": "https://www.youtube.com/watch?v=YbrP10396f4",
+      "title": "FF6 アドバンス版 追加魔石まとめ ギルガメッシュも登場！ ゆっくり解説 ファイナルファンタジー6 GBA版",
+      "channel": "ハルポップのゲーム",
+      "source_kind": "community-gameplay",
+      "rights_holder": "Square Enix",
+      "start_seconds": 1017,
+      "end_seconds": 1021.2,
+      "still_seconds": 1019,
+      "review": "GBA Flood spell demonstration; not Pixel Remaster",
+      "caption": "ゲーム映像から抽出。範囲・水量はこの演出からの推定です。"
+    },
+    {
+      "spell_id": "ff15-tsunami",
+      "file": "9C6rc5MDkBg.webm",
+      "source": "https://www.youtube.com/watch?v=9C6rc5MDkBg",
+      "title": "Final Fantasy XV - Summon - Leviathan - Tsunami - Gameplay",
+      "channel": "Mr. Fep (misterfep)",
+      "source_kind": "community-gameplay",
+      "rights_holder": "Square Enix",
+      "start_seconds": 47.5,
+      "end_seconds": 54.5,
+      "still_seconds": 50,
+      "review": "Leviathan water wall during Tsunami summon",
+      "caption": "ゲーム映像から抽出。範囲・水量はこの演出からの推定です。"
+    },
+    {
+      "spell_id": "chrono-cross-deluge",
+      "file": "k5lPcjAvruE.webm",
+      "source": "https://www.youtube.com/watch?v=k5lPcjAvruE",
+      "title": "Chrono Cross Lv5 Deluge",
+      "channel": "Vampyreq",
+      "source_kind": "community-gameplay",
+      "rights_holder": "Square Enix",
+      "start_seconds": 4.5,
+      "end_seconds": 8,
+      "still_seconds": 6,
+      "review": "Original Chrono Cross Deluge element",
+      "caption": "ゲーム映像から抽出。範囲・水量はこの演出からの推定です。"
+    },
+    {
+      "spell_id": "goldensun-neptune",
+      "file": "iy2xi2nRk-w.mp4",
+      "source": "https://www.youtube.com/watch?v=iy2xi2nRk-w",
+      "title": "Golden Sun - Neptune - Gldsun",
+      "channel": "Jejul971",
+      "source_kind": "community-gameplay",
+      "rights_holder": "Nintendo / CAMELOT",
+      "start_seconds": 49,
+      "end_seconds": 56.5,
+      "still_seconds": 52,
+      "review": "Lost Age Neptune summon",
+      "caption": "ゲーム映像から抽出。範囲・水量はこの演出からの推定です。"
+    },
+    {
+      "spell_id": "rs3-maelstrom",
+      "file": "G2ULKrIoPHg.webm",
+      "source": "https://www.youtube.com/watch?v=G2ULKrIoPHg",
+      "title": "#21　メイルシュトローム地獄！対決フォルネウス！【ロマサガ３】【Romancing SaGa 3】",
+      "channel": "ゆう-yu-のゲーム広場",
+      "source_kind": "community-gameplay",
+      "rights_holder": "Square Enix",
+      "start_seconds": 166,
+      "end_seconds": 170.5,
+      "still_seconds": 168,
+      "review": "Forneus names Maelstrom, then the visible water vortex",
+      "caption": "ゲーム映像から抽出。範囲・水量はこの演出からの推定です。"
+    }
+  ]
+}

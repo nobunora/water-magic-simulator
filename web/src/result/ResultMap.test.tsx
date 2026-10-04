@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   addColorStop: vi.fn(),
   arc: vi.fn(),
   fill: vi.fn(),
+  pathMove: vi.fn(),
+  pathLine: vi.fn(),
 }));
 
 vi.mock("maplibre-gl", () => {
@@ -200,6 +202,12 @@ describe("ResultMap", () => {
   });
 
   beforeEach(() => {
+    vi.stubGlobal("Path2D", class {
+      moveTo = mocks.pathMove;
+      lineTo = mocks.pathLine;
+      arc = mocks.arc;
+    });
+    mocks.pathMove.mockClear(); mocks.pathLine.mockClear();
     mocks.constructorOptions.length = 0;
     mocks.jumpTo.mockClear();
     mocks.updateImage.mockClear();
@@ -296,18 +304,16 @@ describe("ResultMap", () => {
     expect(mocks.updateImage).toHaveBeenLastCalledWith(
       expect.objectContaining({ url: "/api/result/depth.png?time_index=3" }),
     );
-    expect(mocks.setData).toHaveBeenLastCalledWith(expect.objectContaining({
-      features: flowData.features,
-    }));
+    expect(mocks.setData).not.toHaveBeenCalled();
     expect(mocks.setLayoutProperty).toHaveBeenCalledWith(
       "flow-vector-halo",
       "visibility",
-      "visible",
+      "none",
     );
     expect(mocks.setLayoutProperty).toHaveBeenCalledWith(
       "flow-vector-lines",
       "visibility",
-      "visible",
+      "none",
     );
     expect(mocks.moveLayer).toHaveBeenCalledWith("flow-vector-halo");
     expect(mocks.moveLayer).toHaveBeenCalledWith("flow-vector-lines");
@@ -319,17 +325,17 @@ describe("ResultMap", () => {
       expect.objectContaining({
         sourceFeatureCount: 1,
         renderedFeatureCount: 1,
-        svgArrowCount: 1,
+        svgArrowCount: 0,
+        canvasArrowCount: 1,
       }),
     );
     const svg = view.container.querySelector(".result-flow-svg");
-    expect(svg).toHaveAttribute("data-flow-svg-arrows", "1");
-    expect(svg?.querySelectorAll("path")).toHaveLength(2);
-    const shaftPath = svg?.querySelectorAll("path")[1]?.getAttribute("d") ?? "";
-    const shaftMatch = shaftPath.match(/^M ([\d.-]+) ([\d.-]+) L ([\d.-]+) ([\d.-]+)/);
-    expect(shaftMatch).not.toBeNull();
-    const [, x1, y1, x2, y2] = shaftMatch ?? [];
-    expect(Math.hypot(Number(x2) - Number(x1), Number(y2) - Number(y1))).toBeCloseTo(18, 1);
+    expect(svg).toHaveAttribute("data-flow-svg-arrows", "0");
+    expect(svg?.querySelectorAll("path")).toHaveLength(0);
+    expect(view.container.querySelector(".result-vector-canvas")).toHaveAttribute("data-flow-canvas-arrows", "1");
+    const [x1, y1] = mocks.pathMove.mock.calls[0];
+    const [x2, y2] = mocks.pathLine.mock.calls[0];
+    expect(Math.hypot(x2 - x1, y2 - y1)).toBeCloseTo(18, 1);
 
     const overlay = options(1);
     const vectorPaint = overlay.style.layers.find(
@@ -407,7 +413,8 @@ describe("ResultMap", () => {
     const targetDistance = Number(canvas.dataset.flowParticleTargetDistancePx);
     expect(targetDistance / spacing).toBeCloseTo(15, 5);
     expect(mocks.arc).toHaveBeenCalledTimes(16);
-    expect(mocks.fill).toHaveBeenCalledTimes(16);
+    expect(mocks.fill).toHaveBeenCalledTimes(2);
+    expect(mocks.createLinearGradient).not.toHaveBeenCalled();
 
     act(() => {
       for (let step = 1; step <= 30; step += 1) {

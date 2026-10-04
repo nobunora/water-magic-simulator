@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>水魔法の解析 — UIモック</title>
+<link rel="stylesheet" href="mock.css">
+</head>
+<body>
+<header><div class="brand"><span class="drop">◈</span><div>水魔法の解析<small>WATER MAGIC / TERRAIN SIMULATION</small></div></div><span class="prototype">UIモック · 解析なし</span></header>
+<main>
+<aside>
+<div class="step">01 / 魔法を選ぶ</div><h1>どんな水を、<br>どこに生み出す？</h1>
+<p class="intro">魔法を選び、地図上で範囲を確かめます。</p>
+<div class="list-heading"><h2>水魔法</h2><span>推定水量が小さい順 ↓</span></div>
+<div id="spell-list" role="group" aria-label="魔法の選択"></div>
+<p class="note">推定範囲の下限で並べています · モックは1件</p>
+<section id="settings" hidden>
+<div class="section-heading"><h2>魔法の設定</h2><span>円形の降雨</span></div>
+<label for="volume">総水量 <output id="volume-value">78 L</output></label>
+<input id="volume" type="range" min="39" max="117" step="1" value="78">
+<div class="ends"><span>39 L</span><span>117 L</span></div>
+<div class="fields"><label>半径<span class="input-wrap"><input id="radius" type="number" min="1" max="50" step="0.1" value="12.2">m</span></label><label>持続時間<span class="input-wrap"><input id="duration" type="number" min="0.1" max="60" step="0.1" value="6">秒</span></label></div>
+<label class="relax">水が広がる緩和時間<span class="input-wrap"><input id="relax" type="number" min="0" max="600" step="1" value="60">秒</span></label>
+<div class="metrics"><div><span>等価水深</span><strong id="depth-value">0.167 mm</strong></div><div><span>解析時間</span><strong id="total-value">66 秒</strong></div></div>
+<p class="note">水量は演出からの概算です。等価水深は実際の浸水深ではありません。初期値はモック用の例です。</p>
+<button id="preview" class="primary">この条件を確認する <span>→</span></button>
+<p id="message" role="status"></p>
+</section>
+<footer>GIF: <a href="https://commons.wikimedia.org/wiki/File:Rain_2.gif" target="_blank" rel="noreferrer">Rain 2 / Shisma · CC0</a><br>ゲームアイコンは識別用の仮デザインです。</footer>
+</aside>
+<section class="map-panel" aria-label="配置プレビュー">
+<div class="map" id="map">
+<svg class="basemap" viewBox="0 0 1000 800" preserveAspectRatio="xMidYMid slice" aria-label="配置確認用の模式地図">
+<defs><pattern id="blocks" width="180" height="150" patternUnits="userSpaceOnUse"><rect width="180" height="150" fill="#eaece5"/><path d="M0 12H180M12 0V150" stroke="#fff" stroke-width="17"/><path d="M0 12H180M12 0V150" stroke="#d4d8ce" stroke-width="1"/><g fill="#d9dcd2" stroke="#cbd0c4"><rect x="34" y="33" width="55" height="42" rx="3"/><rect x="101" y="33" width="58" height="42" rx="3"/><rect x="34" y="86" width="39" height="39" rx="3"/><rect x="89" y="86" width="70" height="39" rx="3"/></g></pattern></defs>
+<rect width="1000" height="800" fill="url(#blocks)"/><path d="M820 -80C470 180 800 270 470 520S360 720 240 900" fill="none" stroke="#d5e5d7" stroke-width="145"/><path d="M820 -80C470 180 800 270 470 520S360 720 240 900" fill="none" stroke="#adcfd5" stroke-width="86"/><path d="M820 -80C470 180 800 270 470 520S360 720 240 900" fill="none" stroke="#c2dce0" stroke-width="65"/><path d="M-30 350L1030 350M240 -50L240 850" stroke="#d7c9a9" stroke-width="33"/><path d="M-30 350L1030 350M240 -50L240 850" stroke="#fff5dc" stroke-width="27"/><rect x="45" y="475" width="195" height="147" rx="24" fill="#ccdbbf"/><g fill="#9aad8a" opacity=".6"><circle cx="90" cy="516" r="20"/><circle cx="145" cy="573" r="24"/><circle cx="195" cy="519" r="19"/></g><g fill="#818e83" font-size="14" font-family="sans-serif"><text x="70" y="460">みどり公園</text><text x="294" y="329">中央通り</text><text x="740" y="200">水辺エリア</text></g>
+</svg>
+<div class="map-top"><span>模式地図 · 実際の地形ではありません</span><span class="north">↑ N</span></div>
+<div class="domain"><span>解析領域</span></div>
+<div class="anchor" id="anchor" hidden><div id="rain-frame" class="rain-frame"><img id="rain" src="rain.gif" alt="背景付きの雨のイメージアニメ"><span>Healing Rain · イメージ</span></div><div id="footprint" class="footprint"><span id="radius-label">半径 12.2 m</span></div><div class="pin">＋</div></div>
+<div id="empty-state" class="empty-state">左の魔法を選ぶと、<br>地図の中心にイメージを表示します。</div>
+<div class="map-bottom"><span class="scale">模式スケール</span><button id="center" disabled>中心に配置</button></div>
+</div>
+<div class="overlay-controls"><div><strong>イメージアニメ</strong><small>背景付きGIFを、給水範囲と重ねて表示</small></div><button id="play" disabled>停止</button><button id="visibility" disabled>非表示</button><label>透明度 <input id="opacity" type="range" min="20" max="100" value="65" aria-label="GIFの透明度"></label></div>
+</section>
+</main>
+<script src="mock.js"></script>
+</body></html>

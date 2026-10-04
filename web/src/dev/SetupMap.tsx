@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import {
   GeoJSONSource,
+  LngLat,
+  LngLatBounds,
   Map as MapLibreMap,
   Marker,
   NavigationControl,
@@ -9,6 +11,7 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import type { AnalysisArea } from "../api/client";
+import MagicMapPreview, { type MagicPreview } from "./MagicMapPreview";
 
 type Props = {
   centerLat: number;
@@ -16,6 +19,10 @@ type Props = {
   area: AnalysisArea | null;
   disabled: boolean;
   onSelect: (lon: number, lat: number) => void;
+  magicPreview?: MagicPreview | null;
+  magicFocusRequest?: number;
+  onMagicBearingChange?: (bearing: string) => void;
+  onViewportChange?: (lon: number, lat: number) => void;
 };
 
 function areaFeature(area: AnalysisArea | null) {
@@ -134,6 +141,10 @@ export default function SetupMap({
   area,
   disabled,
   onSelect,
+  magicPreview,
+  magicFocusRequest,
+  onMagicBearingChange,
+  onViewportChange,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -144,6 +155,8 @@ export default function SetupMap({
   const disabledRef = useRef(disabled);
   const areaRef = useRef(area);
   const initialCenterRef = useRef<[number, number]>([centerLon, centerLat]);
+  const onViewportChangeRef = useRef(onViewportChange);
+  onViewportChangeRef.current = onViewportChange;
 
   useEffect(() => {
     onSelectRef.current = onSelect;
@@ -168,6 +181,7 @@ export default function SetupMap({
       container: containerRef.current,
       center: initialCenterRef.current,
       zoom: 14,
+      maxZoom: magicFocusRequest === undefined ? 22 : 24,
       style: {
         version: 8,
         sources: {
@@ -175,6 +189,7 @@ export default function SetupMap({
             type: "raster",
             tiles: ["https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png"],
             tileSize: 256,
+            maxzoom: 18,
             attribution: "国土地理院",
           },
           "analysis-area": {
@@ -203,9 +218,17 @@ export default function SetupMap({
       onSelectRef.current(event.lngLat.lng, event.lngLat.lat);
     };
     map.on("click", handleClick);
+    const reportCenter = () => {
+      if (!onViewportChangeRef.current) return;
+      const center = map.getCenter();
+      onViewportChangeRef.current(center.lng, center.lat);
+    };
+    map.on("moveend", reportCenter);
+    reportCenter();
 
     return () => {
       map.off("click", handleClick);
+      map.off("moveend", reportCenter);
       markerRef.current?.remove();
       markerRef.current = null;
       map.remove();
@@ -246,6 +269,29 @@ export default function SetupMap({
       };
     }
   }, [area, centerLat, centerLon]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !magicPreview || !magicFocusRequest) return;
+    let bounds: [[number, number], [number, number]];
+    if (magicPreview.footprintKind === "domain") {
+      if (!area) return;
+      bounds = [[area.bounds.west_deg, area.bounds.south_deg], [area.bounds.east_deg, area.bounds.north_deg]];
+    } else {
+      // An anchor-centered envelope covers every bearing without moving the
+      // placement center when selection is repeated after the automatic zoom.
+      const radius = magicPreview.footprintKind === "rectangle"
+        ? Math.hypot(Number(magicPreview.length), Number(magicPreview.width) / 2)
+        : Number(magicPreview.radius);
+      if (!Number.isFinite(radius) || radius <= 0) return;
+      bounds = LngLatBounds.fromLngLat(new LngLat(magicPreview.lon, magicPreview.lat), radius).toArray();
+    }
+    map.stop();
+    map.resize();
+    map.fitBounds(bounds, { padding: 72, maxZoom: 24, duration: 450 });
+    // Only an explicit list click requests focus; edits and manual navigation
+    // must not reset the user's viewport.
+  }, [magicFocusRequest]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -296,6 +342,7 @@ export default function SetupMap({
           aria-hidden="true"
           data-analysis-area-dom-outline="true"
         />
+        <MagicMapPreview mapRef={mapRef} magic={magicPreview ?? null} analysisArea={area} disabled={disabled} onBearingChange={onMagicBearingChange} />
       </div>
       {disabled && <p className="setup-map-disabled">解析中は場所と範囲を変更できません。</p>}
     </div>

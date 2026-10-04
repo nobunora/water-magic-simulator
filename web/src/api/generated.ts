@@ -367,6 +367,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/result-energy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Result Energy Status */
+        get: operations["result_energy_status_api_v1_runs__run_id__result_energy_get"];
+        put?: never;
+        /** Start Result Energy */
+        post: operations["start_result_energy_api_v1_runs__run_id__result_energy_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/result-energy/point": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Result Energy Point */
+        get: operations["result_energy_point_api_v1_runs__run_id__result_energy_point_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/result-extrema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Result Extrema */
+        get: operations["result_extrema_api_v1_runs__run_id__result_extrema_get"];
+        put?: never;
+        /** Start Result Extrema */
+        post: operations["start_result_extrema_api_v1_runs__run_id__result_extrema_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/result-extrema/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Result Extrema Status */
+        get: operations["result_extrema_status_api_v1_runs__run_id__result_extrema_progress_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/result-metadata": {
         parameters: {
             query?: never;
@@ -594,6 +664,34 @@ export interface components {
             /** Lon Deg */
             lon_deg: number;
         };
+        /** PointEnergyResponse */
+        PointEnergyResponse: {
+            /**
+             * Cell Area M2
+             * @default 1
+             */
+            cell_area_m2: number;
+            /** Column */
+            column: number;
+            /** Has Data */
+            has_data: boolean;
+            /** Lat Deg */
+            lat_deg: number;
+            /** Lon Deg */
+            lon_deg: number;
+            /** Rank */
+            rank?: number | null;
+            /** Row */
+            row: number;
+            /** Through Time Index */
+            through_time_index: number;
+            /** Through Time Value */
+            through_time_value: string;
+            /** Total Energy J */
+            total_energy_j?: number | null;
+            /** Total Outflow M3 */
+            total_outflow_m3?: number | null;
+        };
         /** PointInspectionResponse */
         PointInspectionResponse: {
             /** Column */
@@ -616,6 +714,8 @@ export interface components {
             max_time_value?: string | null;
             /** Row */
             row: number;
+            /** Speed Mps */
+            speed_mps?: number | null;
             /** Terrain Elevation M */
             terrain_elevation_m?: number | null;
             /** Time Index */
@@ -758,6 +858,34 @@ export interface components {
             /** Min M */
             min_m: number;
         };
+        /** ResultEnergyJobResponse */
+        ResultEnergyJobResponse: {
+            /**
+             * Aggregation Buffer Bytes
+             * @default 0
+             */
+            aggregation_buffer_bytes: number;
+            /** Energy */
+            energy?: components["schemas"]["ResultExtremeLocation"][];
+            /** Error */
+            error?: string | null;
+            /**
+             * Method
+             * @default
+             */
+            method: string;
+            /** Processed Frames */
+            processed_frames: number;
+            /** Progress Percent */
+            progress_percent: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "complete" | "failed";
+            /** Total Frames */
+            total_frames: number;
+        };
         /** ResultEngineSummary */
         ResultEngineSummary: {
             /** Hydromt Sfincs Version */
@@ -768,6 +896,58 @@ export interface components {
             sfincs_engine_source?: string | null;
             /** Sfincs Version */
             sfincs_version?: string | null;
+        };
+        /** ResultExtremaJobResponse */
+        ResultExtremaJobResponse: {
+            /** Depth */
+            depth: components["schemas"]["ResultExtremeLocation"][];
+            /** Error */
+            error?: string | null;
+            /** Processed Frames */
+            processed_frames: number;
+            /** Progress Percent */
+            progress_percent: number;
+            /** Speed */
+            speed: components["schemas"]["ResultExtremeLocation"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "complete" | "failed";
+            /** Total Frames */
+            total_frames: number;
+        };
+        /** ResultExtremaResponse */
+        ResultExtremaResponse: {
+            /** Depth */
+            depth: components["schemas"]["ResultExtremeLocation"][];
+            /** Speed */
+            speed: components["schemas"]["ResultExtremeLocation"][];
+        };
+        /** ResultExtremeLocation */
+        ResultExtremeLocation: {
+            /** Cell Area M2 */
+            cell_area_m2: number;
+            /** Cell Index */
+            cell_index: number;
+            /** Depth M */
+            depth_m: number;
+            /** Lat Deg */
+            lat_deg: number;
+            /** Lon Deg */
+            lon_deg: number;
+            /** Rank */
+            rank: number;
+            /** Speed Mps */
+            speed_mps?: number | null;
+            /** Time Index */
+            time_index: number;
+            /** Time Value */
+            time_value: string;
+            /** Total Energy J */
+            total_energy_j?: number | null;
+            /** Total Outflow M3 */
+            total_outflow_m3?: number | null;
         };
         /** ResultImportResponse */
         ResultImportResponse: {
@@ -888,12 +1068,13 @@ export interface components {
             /**
              * Grid Cell Size M
              * @default 1
-             * @enum {integer}
+             * @enum {number}
              */
-            grid_cell_size_m: 1 | 2 | 4;
+            grid_cell_size_m: 0.5 | 1 | 2 | 4;
             /** Rainfall */
-            rainfall: components["schemas"]["ConstantRainfall"] | components["schemas"]["HistoricalUniformRainfall"] | components["schemas"]["HistoricalObservedProfile"];
+            rainfall?: (components["schemas"]["ConstantRainfall"] | components["schemas"]["HistoricalUniformRainfall"] | components["schemas"]["HistoricalObservedProfile"]) | null;
             requested_accuracy_mode: components["schemas"]["AccuracyMode"];
+            water_magic?: components["schemas"]["WaterMagicConfig"] | null;
         };
         /** RunCreateResponse */
         RunCreateResponse: {
@@ -951,6 +1132,89 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** WaterMagicConfig */
+        WaterMagicConfig: {
+            /** Bearing Deg */
+            bearing_deg: number;
+            /** Casting Seconds */
+            casting_seconds: number;
+            /**
+             * Catalog Revision
+             * @default 2026-10-03
+             * @constant
+             */
+            catalog_revision: "2026-10-03";
+            /**
+             * Footprint Kind
+             * @default circle
+             * @enum {string}
+             */
+            footprint_kind: "circle" | "domain" | "rectangle" | "sector";
+            /** Generation Rate M3Ps */
+            generation_rate_m3ps?: number | null;
+            /**
+             * Initial Motion
+             * @default none
+             * @enum {string}
+             */
+            initial_motion: "none" | "directional" | "radial" | "vortex";
+            /**
+             * Initial Speed Mps
+             * @default 0
+             */
+            initial_speed_mps: number;
+            /**
+             * Length M
+             * @default 20
+             */
+            length_m: number;
+            position: components["schemas"]["LonLat"];
+            /** Radius M */
+            radius_m: number;
+            /** Relaxation Seconds */
+            relaxation_seconds: number;
+            /**
+             * Release Mode
+             * @default continuous
+             * @enum {string}
+             */
+            release_mode: "continuous" | "initial";
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: "1";
+            /**
+             * Sector Angle Deg
+             * @default 90
+             */
+            sector_angle_deg: number;
+            /**
+             * Spell Id
+             * @default healing-rain
+             * @enum {string}
+             */
+            spell_id: "healing-rain" | "gw2-healingrain" | "ff3-tsunami" | "warcraft1-elemental" | "chrono-water2" | "ff7-tidalwave" | "ro-waterball5" | "warcraft3-elemental" | "tales-tidalwave" | "lol-nami-wave" | "dos2-rain" | "kh3-waterga" | "genshin-mona" | "genshin-neuvillette" | "forspoken-cataract" | "bg3-createwater" | "wow-elemental" | "dq7-maelstrom" | "ff6-flood" | "ff15-tsunami" | "chrono-cross-deluge" | "goldensun-neptune" | "rs3-maelstrom" | "school-pool" | "kaiju-godzilla-wave" | "kaiju-titanosaurus-vortex";
+            /** Volume M3 */
+            volume_m3: number;
+            /**
+             * Vortex Core Radius M
+             * @default 2
+             */
+            vortex_core_radius_m: number;
+            /**
+             * Vortex Direction
+             * @default clockwise
+             * @enum {string}
+             */
+            vortex_direction: "clockwise" | "counterclockwise";
+            /**
+             * Width M
+             * @default 10
+             */
+            width_m: number;
         };
     };
     responses: never;
@@ -1578,6 +1842,195 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    result_energy_status_api_v1_runs__run_id__result_energy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultEnergyJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_result_energy_api_v1_runs__run_id__result_energy_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultEnergyJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    result_energy_point_api_v1_runs__run_id__result_energy_point_get: {
+        parameters: {
+            query: {
+                lon: number;
+                lat: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PointEnergyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    result_extrema_api_v1_runs__run_id__result_extrema_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultExtremaResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_result_extrema_api_v1_runs__run_id__result_extrema_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultExtremaJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    result_extrema_status_api_v1_runs__run_id__result_extrema_progress_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultExtremaJobResponse"];
                 };
             };
             /** @description Validation Error */

@@ -11,6 +11,7 @@ from floodsim.domain.rainfall import (
     RainfallTimeSeries,
 )
 from floodsim.domain.run_config import RunConfig
+from floodsim.domain.water_magic import MagicTimeSeries
 from floodsim.providers.jma import JmaCatalogProvider
 
 MODEL_REFERENCE_TIME = datetime(2000, 1, 1, tzinfo=timezone.utc)
@@ -46,8 +47,18 @@ def _constant_series(intensity: float, duration_minutes: int, metadata: dict[str
 def resolve_rainfall(
     config: RunConfig,
     catalog_provider: JmaCatalogProvider | None = None,
-) -> RainfallTimeSeries:
+) -> RainfallTimeSeries | MagicTimeSeries:
     """Resolve supported Phase 3 rainfall modes without runtime historical scraping."""
+    if config.water_magic is not None:
+        magic = config.water_magic
+        times = [0.0, magic.casting_seconds - magic.transition_seconds, float(magic.casting_seconds)]
+        if magic.relaxation_seconds:
+            times.append(float(magic.casting_seconds + magic.relaxation_seconds))
+        return MagicTimeSeries(MODEL_REFERENCE_TIME, times, {
+            "kind": "water_magic", "spell_id": magic.spell_id,
+            "configuration_json": magic.model_dump_json(),
+            "analysis_area_json": config.analysis_area.model_dump_json(),
+        }, magic)
     scenario = config.rainfall
     if isinstance(scenario, ConstantRainfall):
         return _constant_series(

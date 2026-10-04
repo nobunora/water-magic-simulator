@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AnalysisArea } from "../api/client";
 import SetupMap from "./SetupMap";
+import { spellSettings } from "./magicCatalog";
 
 const mocks = vi.hoisted(() => ({
   fitBounds: vi.fn(),
@@ -17,7 +18,8 @@ const mocks = vi.hoisted(() => ({
   markerSetLngLat: vi.fn(),
 }));
 
-vi.mock("maplibre-gl", () => {
+vi.mock("maplibre-gl", async (importOriginal) => {
+  const { LngLat, LngLatBounds } = await importOriginal<typeof import("maplibre-gl")>();
   class Map {
     addControl() {}
     on() {}
@@ -25,7 +27,7 @@ vi.mock("maplibre-gl", () => {
     remove() {}
     once(_event: string, callback: () => void) { callback(); }
     isStyleLoaded() { return true; }
-    getCanvas() { return { style: { cursor: "" } }; }
+    getCanvas() { return { style: { cursor: "" }, getBoundingClientRect: () => ({ left: 0, top: 0 }) }; }
     getSource() { return { setData: mocks.setData }; }
     addSource(...args: unknown[]) { mocks.addSource(...args); }
     addLayer(...args: unknown[]) { mocks.addLayer(...args); }
@@ -54,6 +56,8 @@ vi.mock("maplibre-gl", () => {
     Map,
     Marker,
     NavigationControl,
+    LngLat,
+    LngLatBounds,
   };
 });
 
@@ -161,5 +165,29 @@ describe("SetupMap", () => {
     );
     expect(view.container.querySelectorAll("[data-analysis-area-overlay] path")).toHaveLength(2);
     expect(view.container.querySelector("[data-analysis-area-dom-outline]")).not.toHaveAttribute("hidden");
+  });
+
+  it("focuses small magic on every list click without snapping back on a parameter edit", () => {
+    const initial = area(35.681236, 139.767125);
+    const props = { centerLat: initial.center.lat_deg, centerLon: initial.center.lon_deg,
+      area: initial, disabled: false, onSelect: vi.fn() };
+    const magic = spellSettings("warcraft1-elemental", props.centerLon, props.centerLat);
+    const view = render(<SetupMap {...props} magicPreview={null} magicFocusRequest={0} />);
+    view.rerender(<SetupMap {...props} magicPreview={magic} magicFocusRequest={1} />);
+    const [bounds, options] = mocks.fitBounds.mock.lastCall!;
+    expect(bounds[1][0] - bounds[0][0]).toBeLessThan(0.00002);
+    expect((bounds[0][0] + bounds[1][0]) / 2).toBeCloseTo(magic.lon, 10);
+    expect(options).toEqual({ padding: 72, maxZoom: 24, duration: 450 });
+    const count = mocks.fitBounds.mock.calls.length;
+    view.rerender(<SetupMap {...props} magicPreview={{ ...magic, bearing: "90" }} magicFocusRequest={1} />);
+    expect(mocks.fitBounds).toHaveBeenCalledTimes(count);
+    view.rerender(<SetupMap {...props} magicPreview={magic} magicFocusRequest={2} />);
+    expect(mocks.fitBounds).toHaveBeenCalledTimes(count + 1);
+    const whole = spellSettings("chrono-water2", props.centerLon, props.centerLat);
+    view.rerender(<SetupMap {...props} magicPreview={whole} magicFocusRequest={3} />);
+    expect(mocks.fitBounds.mock.lastCall![0]).toEqual([
+      [initial.bounds.west_deg, initial.bounds.south_deg],
+      [initial.bounds.east_deg, initial.bounds.north_deg],
+    ]);
   });
 });

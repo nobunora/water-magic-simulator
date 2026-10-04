@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "mock:water-magic": "vite --config vite.mock.config.ts",
     "api:check": "node scripts/api-types.mjs --check",
     "api:generate": "node scripts/api-types.mjs",
     "build": "vite build",
