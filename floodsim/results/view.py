@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from PIL import Image
@@ -72,7 +72,8 @@ DEPTH_BANDS: tuple[DepthBand, ...] = (
     DepthBand("1.60 m以上", 1.60, None, (73, 18, 52, 240)),
 )
 
-GRID_RESOLUTION_COLORS: dict[int, tuple[int, int, int, int]] = {
+GRID_RESOLUTION_COLORS: dict[float, tuple[int, int, int, int]] = {
+    0.5: (76, 120, 168, 210),
     1: (38, 70, 83, 210),
     2: (42, 111, 151, 210),
     4: (61, 145, 128, 210),
@@ -104,10 +105,11 @@ class NormalizedArrays:
     velocity_u_mps: np.ndarray | None = None
     velocity_v_mps: np.ndarray | None = None
     velocity_grid_stride: int = 1
+    display_dry_threshold_m: float = DISPLAY_DRY_THRESHOLD_M
 
     @cached_property
     def depth_scale(self) -> AdaptiveScaleResult:
-        return result_scale(self, self.max_depth_m, zero_epsilon=DISPLAY_DRY_THRESHOLD_M)
+        return result_scale(self, self.max_depth_m, zero_epsilon=self.display_dry_threshold_m)
 
     @cached_property
     def elevation_scale(self) -> AdaptiveScaleResult:
@@ -210,9 +212,10 @@ def depth_display_range(arrays: ResultArrays) -> tuple[float, float]:
     """Return one stable colour range for every depth frame of a result."""
     values = np.asarray(arrays.max_depth_m, dtype=np.float64)
     visible = np.asarray(arrays.active_mask, dtype=bool) & np.isfinite(values)
-    visible &= values > DISPLAY_DRY_THRESHOLD_M
+    threshold = getattr(arrays, "display_dry_threshold_m", DISPLAY_DRY_THRESHOLD_M)
+    visible &= values > threshold
     if not np.any(visible):
-        return DISPLAY_DRY_THRESHOLD_M, DISPLAY_DRY_THRESHOLD_M
+        return threshold, threshold
     minimum_m = float(np.min(values[visible]))
     maximum_m = float(np.max(values[visible]))
     return minimum_m, maximum_m
@@ -250,7 +253,7 @@ def terrain_elevation_range(arrays: ResultArrays) -> tuple[float, float]:
     return float(np.min(values[visible])), float(np.max(values[visible]))
 
 
-def load_normalized_arrays(path: str | Path) -> ResultArrays:
+def load_normalized_arrays(path: str | Path, *, static_layer: Literal["elevation", "grid_resolution"] | None = None) -> ResultArrays:
     source = Path(path)
     if not source.is_file():
         raise ResultArtifactMissing(f"normalized result file is missing: {source.name}")
@@ -261,29 +264,21 @@ def load_normalized_arrays(path: str | Path) -> ResultArrays:
                 if "storage_kind" in archive.files
                 else "regular_dense"
             )
-            depth = np.asarray(archive["depth_time_m"], dtype=np.float32)
-            max_depth = np.asarray(archive["max_depth_m"], dtype=np.float32)
-            terrain = np.asarray(archive["terrain_elevation_m"], dtype=np.float32)
             active = np.asarray(archive["active_mask"], dtype=bool)
-            time_values = tuple(
-                str(value) for value in np.asarray(archive["time_values"]).tolist()
-            )
-            has_u = "velocity_u_mps" in archive.files
-            has_v = "velocity_v_mps" in archive.files
+            terrain = (np.asarray(archive["terrain_elevation_m"], dtype=np.float32)
+                       if static_layer != "grid_resolution" else np.zeros(active.shape, dtype=np.float32))
+            depth = (np.asarray(archive["depth_time_m"], dtype=np.float32)
+                     if static_layer is None else np.zeros((0, *active.shape), dtype=np.float32))
+            max_depth = (np.asarray(archive["max_depth_m"], dtype=np.float32)
+                         if static_layer is None else np.zeros(active.shape, dtype=np.float32))
+            time_values = (tuple(str(value) for value in np.asarray(archive["time_values"]).tolist())
+                           if static_layer is None else ())
+            has_u = static_layer is None and "velocity_u_mps" in archive.files
+            has_v = static_layer is None and "velocity_v_mps" in archive.files
             if has_u != has_v:
-                raise ResultViewError(
-                    "normalized velocity arrays must contain both u and v"
-                )
-            velocity_u = (
-                np.asarray(archive["velocity_u_mps"], dtype=np.float32)
-                if has_u
-                else None
-            )
-            velocity_v = (
-                np.asarray(archive["velocity_v_mps"], dtype=np.float32)
-                if has_v
-                else None
-            )
+                raise ResultViewError("normalized velocity arrays must contain both u and v")
+            velocity_u = np.asarray(archive["velocity_u_mps"], dtype=np.float32) if has_u else None
+            velocity_v = np.asarray(archive["velocity_v_mps"], dtype=np.float32) if has_v else None
             velocity_grid_stride = int(
                 np.asarray(archive["velocity_grid_stride"]).item()
             ) if "velocity_grid_stride" in archive.files else 1
@@ -436,10 +431,11 @@ def _depth_rgba(
     minimum_m: float,
     maximum_m: float,
     scale: AdaptiveScaleResult | None = None,
+    dry_threshold_m: float = DISPLAY_DRY_THRESHOLD_M,
 ) -> np.ndarray:
     rgba = np.zeros((*values.shape, 4), dtype=np.uint8)
-    visible = active_mask & np.isfinite(values) & (values > DISPLAY_DRY_THRESHOLD_M)
-    reference = scale or generate_adaptive_breaks(values[visible], zero_epsilon=DISPLAY_DRY_THRESHOLD_M)
+    visible = active_mask & np.isfinite(values) & (values > dry_threshold_m)
+    reference = scale or generate_adaptive_breaks(values[visible], zero_epsilon=dry_threshold_m)
     indices = color_indices(values, reference)
     for index, band in enumerate(DEPTH_BANDS[:reference.class_count]):
         rgba[visible & (indices == index)] = band.rgba
@@ -518,8 +514,16 @@ def render_max_depth_png(arrays: ResultArrays, *, max_px: int = MAX_RENDER_PX) -
     rgba = (
         _adaptive_depth_rgba(arrays, arrays.max_depth_m, minimum_m=minimum_m, maximum_m=maximum_m, scale=arrays.depth_scale)
         if isinstance(arrays, AdaptiveNormalizedArrays)
-        else _depth_rgba(arrays.max_depth_m, arrays.active_mask, minimum_m=minimum_m, maximum_m=maximum_m, scale=arrays.depth_scale)
+        else _depth_rgba(arrays.max_depth_m, arrays.active_mask, minimum_m=minimum_m, maximum_m=maximum_m, scale=arrays.depth_scale, dry_threshold_m=arrays.display_dry_threshold_m)
     )
+    return _png_bytes(rgba, max_px=max_px, categorical=True)
+
+
+def render_depth_values_png(values: np.ndarray, active_mask: np.ndarray,
+                            scale: AdaptiveScaleResult, *, max_px: int = MAX_RENDER_PX,
+                            dry_threshold_m: float = DISPLAY_DRY_THRESHOLD_M) -> bytes:
+    rgba = _depth_rgba(values, active_mask, minimum_m=scale.breaks[0], maximum_m=scale.maximum,
+                      scale=scale, dry_threshold_m=dry_threshold_m)
     return _png_bytes(rgba, max_px=max_px, categorical=True)
 
 
@@ -536,7 +540,7 @@ def render_time_depth_png(
     rgba = (
         _adaptive_depth_rgba(arrays, values, minimum_m=minimum_m, maximum_m=maximum_m, scale=arrays.depth_scale)
         if isinstance(arrays, AdaptiveNormalizedArrays)
-        else _depth_rgba(values, arrays.active_mask, minimum_m=minimum_m, maximum_m=maximum_m, scale=arrays.depth_scale)
+        else _depth_rgba(values, arrays.active_mask, minimum_m=minimum_m, maximum_m=maximum_m, scale=arrays.depth_scale, dry_threshold_m=arrays.display_dry_threshold_m)
     )
     return _png_bytes(rgba, max_px=max_px, categorical=True)
 
@@ -647,7 +651,7 @@ def _adaptive_flow_vectors_geojson(
     valid = (
         arrays.active_mask
         & np.isfinite(depth)
-        & (depth >= DISPLAY_DRY_THRESHOLD_M)
+        & (depth >= getattr(arrays, "display_dry_threshold_m", DISPLAY_DRY_THRESHOLD_M))
         & np.isfinite(u)
         & np.isfinite(vv)
         & np.isfinite(speed)

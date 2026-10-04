@@ -196,6 +196,7 @@
 }
 
 .result-flow-svg,
+.result-vector-canvas,
 .result-flow-canvas {
   position: absolute;
   inset: 0;
@@ -219,6 +220,10 @@
 .result-legend-sidebar {
   background: #fff;
 }
+.result-legends { display: grid; gap: 0.5rem; align-items: start; }
+.result-legends-parallel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.result-legends .result-legend { min-width: 0; overflow-wrap: anywhere; }
+.result-legends .result-legend i { flex-shrink: 0; }
 
 .result-legend span {
   display: flex;
@@ -255,11 +260,26 @@
   margin-bottom: 0.5rem;
 }
 
+.result-energy-comparison {
+  margin-top: 0.75rem;
+  background: #f0f9ff;
+}
+
+.result-energy-comparison h4 {
+  margin: 0 0 0.5rem;
+}
+
+.result-energy-comparison p {
+  margin: 0.5rem 0;
+  overflow-wrap: anywhere;
+}
+
 .result-sidebar dl {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 0.35rem 0.6rem;
 }
+.result-point-water-motion { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
 
 .result-sidebar dt {
   font-weight: 700;

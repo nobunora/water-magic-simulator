@@ -87,6 +87,7 @@ def test_point_summary_matches_native_series_and_survives_restart(
     assert after["max_time_index"] == 1
     assert after["max_depth_m"] == pytest.approx(0.6)
     assert after["depth_m"] == pytest.approx(0.4)
+    assert after["speed_mps"] == pytest.approx(np.hypot(.2, .1))
     monkeypatch.setattr(
         xr,
         "open_dataset",
@@ -149,6 +150,28 @@ def test_viewport_vectors_match_full_grid_without_losing_global_alignment(source
         feature["properties"]["time_index"] = 2
     assert cropped["features"] == full["features"]
     assert 0 < cropped["metadata"]["read_window_cells"] < 64
+
+
+def test_half_metre_velocities_are_independent_of_two_metre_display_sampling(source_case):
+    source, model, area = source_case
+    area = area.model_copy(update={"width_m": 4, "height_m": 4, "area_m2": 16})
+    source = replace(source, block_size_m=0.5)
+    prepare_regular_queries(source, model_dir=model)
+    west, south = coordinates(area, -3, -3)
+    east, north = coordinates(area, 3, 3)
+    data = regular_flow_viewport(source, model_dir=model, area=area, time_index=1,
+        west=west, south=south, east=east, north=north, stride=2,
+        speed_scale=saved_speed_scale(source, model), include_field=True)
+    assert data["metadata"]["target_spacing_m"] == 2
+    assert data["metadata"]["sample_stride_cells"] == 4
+    assert len(data["features"]) == 4
+    assert data["flow_field"]["cell_size_m"] == 0.5
+    assert data["flow_field"]["width"] == data["flow_field"]["height"] == 8
+    vectors = regular_flow_viewport(source, model_dir=model, area=area, time_index=1,
+        west=west, south=south, east=east, north=north, stride=2,
+        speed_scale=saved_speed_scale(source, model))
+    assert "flow_field" not in vectors
+    assert vectors["features"] == data["features"]
 
 
 def test_source_api_queries_never_call_full_grid_adapter(source_case, monkeypatch):
@@ -233,3 +256,66 @@ def test_regular_grid_reads_only_mask(source_case, monkeypatch):
 
     monkeypatch.setattr(regular_queries.xr, "open_dataset", mask_only)
     assert regular_queries.regular_grid_png(source, model, 4096) == expected
+
+
+def test_half_metre_grid_has_visible_cells(source_case):
+    from io import BytesIO
+
+    from PIL import Image
+
+    from floodsim.results.regular_queries import regular_grid_png
+
+    source, model, _ = source_case
+    source = replace(source, block_size_m=0.5)
+    rgba = np.array(Image.open(BytesIO(regular_grid_png(source, model, 4096))))
+    assert np.any(rgba[..., 3] > 0)
+
+
+@pytest.mark.parametrize("layer", ["grid_resolution", "elevation"])
+def test_legacy_static_layers_do_not_decode_water_or_velocity(tmp_path, monkeypatch, layer):
+    from floodsim.results import view
+
+    archive_path = tmp_path / "static.npz"
+    np.savez(archive_path, active_mask=np.ones((2, 2), dtype=bool),
+             terrain_elevation_m=np.ones((2, 2), dtype=np.float32), grid_resolution_m=0.5)
+    original_load = np.load
+
+    class StaticArchive:
+        def __init__(self, archive):
+            self.archive = archive
+            self.files = archive.files
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            self.archive.close()
+        def __getitem__(self, name):
+            assert name not in {"depth_time_m", "max_depth_m", "velocity_u_mps", "velocity_v_mps", "time_values"}
+            if layer == "grid_resolution":
+                assert name != "terrain_elevation_m"
+            return self.archive[name]
+
+    monkeypatch.setattr(view.np, "load", lambda *args, **kwargs: StaticArchive(original_load(*args, **kwargs)))
+    arrays = view.load_normalized_arrays(archive_path, static_layer=layer)
+    png = view.render_grid_resolution_png(arrays) if layer == "grid_resolution" else view.render_terrain_elevation_png(arrays)
+    assert png.startswith(b"\x89PNG")
+
+
+def test_depth_reads_only_selected_h_and_reuses_global_scale(source_case, monkeypatch):
+    from floodsim.results import regular_queries
+    from floodsim.results.view import render_time_depth_png
+
+    source, model, _ = source_case
+    prepare_regular_queries(source, model_dir=model)
+    expected = render_time_depth_png(regular_window_arrays(source, model_dir=model, time_index=1), time_index=0)
+    original_open = xr.open_dataset
+    reads = []
+    def depth_only(path):
+        with original_open(path) as dataset:
+            reads.append(path)
+            return dataset[["h"]].load()
+    monkeypatch.setattr(regular_queries.xr, "open_dataset", depth_only)
+    actual = regular_queries.regular_depth_png(source, model, 1, 4096)
+    assert actual == expected
+    assert len(reads) == 1
+    assert regular_queries.regular_depth_png(source, model, 1, 4096) == actual
+    assert len(reads) == 1

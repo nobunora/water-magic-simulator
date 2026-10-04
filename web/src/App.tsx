@@ -1,5 +1,6 @@
 import SmokeApp from "./dev/SmokeApp";
 
 export default function App() {
-  return <SmokeApp />;
+  const parameters = new URLSearchParams(window.location.search);
+  return <SmokeApp magicMock={parameters.get("mode") === "water-magic" || parameters.get("mock") === "water-magic"} />;
 }

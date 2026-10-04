@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-PRESET_HALF_SIZES_M = frozenset({250, 500, 1000, 2000, 4000})
+PRESET_HALF_SIZES_M = frozenset({100, 250, 500, 1000, 2000, 4000})
 
 
 class DomainModel(BaseModel):

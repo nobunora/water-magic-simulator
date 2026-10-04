@@ -507,6 +507,99 @@
         "title": "LonLat",
         "type": "object"
       },
+      "PointEnergyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cell_area_m2": {
+            "default": 1,
+            "exclusiveMinimum": 0.0,
+            "title": "Cell Area M2",
+            "type": "number"
+          },
+          "column": {
+            "minimum": 0.0,
+            "title": "Column",
+            "type": "integer"
+          },
+          "has_data": {
+            "title": "Has Data",
+            "type": "boolean"
+          },
+          "lat_deg": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat Deg",
+            "type": "number"
+          },
+          "lon_deg": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lon Deg",
+            "type": "number"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "row": {
+            "minimum": 0.0,
+            "title": "Row",
+            "type": "integer"
+          },
+          "through_time_index": {
+            "minimum": 0.0,
+            "title": "Through Time Index",
+            "type": "integer"
+          },
+          "through_time_value": {
+            "title": "Through Time Value",
+            "type": "string"
+          },
+          "total_energy_j": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Energy J"
+          },
+          "total_outflow_m3": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Outflow M3"
+          }
+        },
+        "required": [
+          "lon_deg",
+          "lat_deg",
+          "has_data",
+          "row",
+          "column",
+          "through_time_index",
+          "through_time_value"
+        ],
+        "title": "PointEnergyResponse",
+        "type": "object"
+      },
       "PointInspectionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -591,6 +684,18 @@
             "minimum": 0.0,
             "title": "Row",
             "type": "integer"
+          },
+          "speed_mps": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Mps"
           },
           "terrain_elevation_m": {
             "anyOf": [
@@ -1067,6 +1172,74 @@
         "title": "ResultElevationLegendItem",
         "type": "object"
       },
+      "ResultEnergyJobResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "aggregation_buffer_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Aggregation Buffer Bytes",
+            "type": "integer"
+          },
+          "energy": {
+            "items": {
+              "$ref": "#/components/schemas/ResultExtremeLocation"
+            },
+            "title": "Energy",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "method": {
+            "default": "",
+            "title": "Method",
+            "type": "string"
+          },
+          "processed_frames": {
+            "minimum": 0.0,
+            "title": "Processed Frames",
+            "type": "integer"
+          },
+          "progress_percent": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Progress Percent",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "complete",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total_frames": {
+            "minimum": 0.0,
+            "title": "Total Frames",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "progress_percent",
+          "processed_frames",
+          "total_frames"
+        ],
+        "title": "ResultEnergyJobResponse",
+        "type": "object"
+      },
       "ResultEngineSummary": {
         "additionalProperties": false,
         "properties": {
@@ -1116,6 +1289,188 @@
           }
         },
         "title": "ResultEngineSummary",
+        "type": "object"
+      },
+      "ResultExtremaJobResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "depth": {
+            "items": {
+              "$ref": "#/components/schemas/ResultExtremeLocation"
+            },
+            "title": "Depth",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "processed_frames": {
+            "minimum": 0.0,
+            "title": "Processed Frames",
+            "type": "integer"
+          },
+          "progress_percent": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Progress Percent",
+            "type": "integer"
+          },
+          "speed": {
+            "items": {
+              "$ref": "#/components/schemas/ResultExtremeLocation"
+            },
+            "title": "Speed",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "complete",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total_frames": {
+            "minimum": 0.0,
+            "title": "Total Frames",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "depth",
+          "speed",
+          "status",
+          "progress_percent",
+          "processed_frames",
+          "total_frames"
+        ],
+        "title": "ResultExtremaJobResponse",
+        "type": "object"
+      },
+      "ResultExtremaResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "depth": {
+            "items": {
+              "$ref": "#/components/schemas/ResultExtremeLocation"
+            },
+            "title": "Depth",
+            "type": "array"
+          },
+          "speed": {
+            "items": {
+              "$ref": "#/components/schemas/ResultExtremeLocation"
+            },
+            "title": "Speed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "depth",
+          "speed"
+        ],
+        "title": "ResultExtremaResponse",
+        "type": "object"
+      },
+      "ResultExtremeLocation": {
+        "additionalProperties": false,
+        "properties": {
+          "cell_area_m2": {
+            "exclusiveMinimum": 0.0,
+            "title": "Cell Area M2",
+            "type": "number"
+          },
+          "cell_index": {
+            "minimum": 0.0,
+            "title": "Cell Index",
+            "type": "integer"
+          },
+          "depth_m": {
+            "minimum": 0.0,
+            "title": "Depth M",
+            "type": "number"
+          },
+          "lat_deg": {
+            "title": "Lat Deg",
+            "type": "number"
+          },
+          "lon_deg": {
+            "title": "Lon Deg",
+            "type": "number"
+          },
+          "rank": {
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "speed_mps": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Mps"
+          },
+          "time_index": {
+            "minimum": 0.0,
+            "title": "Time Index",
+            "type": "integer"
+          },
+          "time_value": {
+            "title": "Time Value",
+            "type": "string"
+          },
+          "total_energy_j": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Energy J"
+          },
+          "total_outflow_m3": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Outflow M3"
+          }
+        },
+        "required": [
+          "rank",
+          "cell_index",
+          "lon_deg",
+          "lat_deg",
+          "time_index",
+          "time_value",
+          "depth_m",
+          "cell_area_m2"
+        ],
+        "title": "ResultExtremeLocation",
         "type": "object"
       },
       "ResultImportResponse": {
@@ -1405,43 +1760,60 @@
           "grid_cell_size_m": {
             "default": 1,
             "enum": [
+              0.5,
               1,
               2,
               4
             ],
             "title": "Grid Cell Size M",
-            "type": "integer"
+            "type": "number"
           },
           "rainfall": {
-            "discriminator": {
-              "mapping": {
-                "constant": "#/components/schemas/ConstantRainfall",
-                "historical_observed_profile": "#/components/schemas/HistoricalObservedProfile",
-                "historical_uniform": "#/components/schemas/HistoricalUniformRainfall"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
+            "anyOf": [
               {
-                "$ref": "#/components/schemas/ConstantRainfall"
+                "discriminator": {
+                  "mapping": {
+                    "constant": "#/components/schemas/ConstantRainfall",
+                    "historical_observed_profile": "#/components/schemas/HistoricalObservedProfile",
+                    "historical_uniform": "#/components/schemas/HistoricalUniformRainfall"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ConstantRainfall"
+                  },
+                  {
+                    "$ref": "#/components/schemas/HistoricalUniformRainfall"
+                  },
+                  {
+                    "$ref": "#/components/schemas/HistoricalObservedProfile"
+                  }
+                ]
               },
               {
-                "$ref": "#/components/schemas/HistoricalUniformRainfall"
-              },
-              {
-                "$ref": "#/components/schemas/HistoricalObservedProfile"
+                "type": "null"
               }
             ],
             "title": "Rainfall"
           },
           "requested_accuracy_mode": {
             "$ref": "#/components/schemas/AccuracyMode"
+          },
+          "water_magic": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WaterMagicConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "analysis_area",
-          "requested_accuracy_mode",
-          "rainfall"
+          "requested_accuracy_mode"
         ],
         "title": "RunConfig",
         "type": "object"
@@ -1621,6 +1993,187 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WaterMagicConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "bearing_deg": {
+            "maximum": 360.0,
+            "minimum": 0.0,
+            "title": "Bearing Deg",
+            "type": "number"
+          },
+          "casting_seconds": {
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Casting Seconds",
+            "type": "integer"
+          },
+          "catalog_revision": {
+            "const": "2026-10-03",
+            "default": "2026-10-03",
+            "title": "Catalog Revision",
+            "type": "string"
+          },
+          "footprint_kind": {
+            "default": "circle",
+            "enum": [
+              "circle",
+              "domain",
+              "rectangle",
+              "sector"
+            ],
+            "title": "Footprint Kind",
+            "type": "string"
+          },
+          "generation_rate_m3ps": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Rate M3Ps"
+          },
+          "initial_motion": {
+            "default": "none",
+            "enum": [
+              "none",
+              "directional",
+              "radial",
+              "vortex"
+            ],
+            "title": "Initial Motion",
+            "type": "string"
+          },
+          "initial_speed_mps": {
+            "default": 0,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Initial Speed Mps",
+            "type": "number"
+          },
+          "length_m": {
+            "default": 20,
+            "exclusiveMinimum": 0.0,
+            "maximum": 4000.0,
+            "title": "Length M",
+            "type": "number"
+          },
+          "position": {
+            "$ref": "#/components/schemas/LonLat"
+          },
+          "radius_m": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 4000.0,
+            "title": "Radius M",
+            "type": "number"
+          },
+          "relaxation_seconds": {
+            "maximum": 36000.0,
+            "minimum": 0.0,
+            "title": "Relaxation Seconds",
+            "type": "integer"
+          },
+          "release_mode": {
+            "default": "continuous",
+            "enum": [
+              "continuous",
+              "initial"
+            ],
+            "title": "Release Mode",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "sector_angle_deg": {
+            "default": 90,
+            "exclusiveMinimum": 0.0,
+            "maximum": 360.0,
+            "title": "Sector Angle Deg",
+            "type": "number"
+          },
+          "spell_id": {
+            "default": "healing-rain",
+            "enum": [
+              "healing-rain",
+              "gw2-healingrain",
+              "ff3-tsunami",
+              "warcraft1-elemental",
+              "chrono-water2",
+              "ff7-tidalwave",
+              "ro-waterball5",
+              "warcraft3-elemental",
+              "tales-tidalwave",
+              "lol-nami-wave",
+              "dos2-rain",
+              "kh3-waterga",
+              "genshin-mona",
+              "genshin-neuvillette",
+              "forspoken-cataract",
+              "bg3-createwater",
+              "wow-elemental",
+              "dq7-maelstrom",
+              "ff6-flood",
+              "ff15-tsunami",
+              "chrono-cross-deluge",
+              "goldensun-neptune",
+              "rs3-maelstrom",
+              "school-pool",
+              "kaiju-godzilla-wave",
+              "kaiju-titanosaurus-vortex"
+            ],
+            "title": "Spell Id",
+            "type": "string"
+          },
+          "volume_m3": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000000.0,
+            "title": "Volume M3",
+            "type": "number"
+          },
+          "vortex_core_radius_m": {
+            "default": 2,
+            "exclusiveMinimum": 0.0,
+            "maximum": 4000.0,
+            "title": "Vortex Core Radius M",
+            "type": "number"
+          },
+          "vortex_direction": {
+            "default": "clockwise",
+            "enum": [
+              "clockwise",
+              "counterclockwise"
+            ],
+            "title": "Vortex Direction",
+            "type": "string"
+          },
+          "width_m": {
+            "default": 10,
+            "exclusiveMinimum": 0.0,
+            "maximum": 4000.0,
+            "title": "Width M",
+            "type": "number"
+          }
+        },
+        "required": [
+          "position",
+          "radius_m",
+          "bearing_deg",
+          "volume_m3",
+          "casting_seconds",
+          "relaxation_seconds"
+        ],
+        "title": "WaterMagicConfig",
         "type": "object"
       }
     }
@@ -2543,6 +3096,282 @@
           }
         },
         "summary": "Max Depth Layer",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/result-energy": {
+      "get": {
+        "operationId": "result_energy_status_api_v1_runs__run_id__result_energy_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnergyJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Result Energy Status",
+        "tags": [
+          "results"
+        ]
+      },
+      "post": {
+        "operationId": "start_result_energy_api_v1_runs__run_id__result_energy_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultEnergyJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Result Energy",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/result-energy/point": {
+      "get": {
+        "operationId": "result_energy_point_api_v1_runs__run_id__result_energy_point_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "maximum": 180,
+              "minimum": -180,
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Lat",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PointEnergyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Result Energy Point",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/result-extrema": {
+      "get": {
+        "operationId": "result_extrema_api_v1_runs__run_id__result_extrema_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultExtremaResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Result Extrema",
+        "tags": [
+          "results"
+        ]
+      },
+      "post": {
+        "operationId": "start_result_extrema_api_v1_runs__run_id__result_extrema_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultExtremaJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Result Extrema",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/result-extrema/progress": {
+      "get": {
+        "operationId": "result_extrema_status_api_v1_runs__run_id__result_extrema_progress_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultExtremaJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Result Extrema Status",
         "tags": [
           "results"
         ]

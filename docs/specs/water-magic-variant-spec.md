@@ -1,8 +1,16 @@
 # Water magic variant specification
 
-> Status: Draft — source catalog captured; preset approval and engine forcing validation required before Ready.
+Water magic defaults to a ±100 m (200×200 m, 160,000 half-metre cells) analysis domain, including New Analysis; saved-result loading preserves its original domain. Short-cast output prefers 0.2 s, then 0.5 s or an integer divisor to preserve the 600-frame budget and exact casting/end boundaries. Casts >=300 s still prefer 10 s. Solver maximum step remains 0.01 s. SFINCS solves on 0.5 m cells, subdividing each former 1 m cell into 2×2 independent hydraulic cells. Vector and particle display density uses the original zoom-dependent spacing only. Native 0.5 m hydraulics are retained; the bounded native velocity field is requested only for particle display.
+
+Latest maximum-value instruction: all 16 presets select their estimated maximum volume. Nami uses forward length 7 m / transverse width 30 m; FFIII Tsunami uses 15 / 20 m. Tales Tidal Wave uses a finite 9.8 m radius circle, not the analysis domain. Dimensions and area display one decimal while calculation and latitude/longitude precision are preserved. See [range evidence and assumptions](water-magic-range-estimates.md).
+
+> Status: User approved implementation of all 16 catalog entries as explicit water-deposition approximations, with game icons and per-spell GIF assignments.
+>
+> Latest visual instruction (2026-10-03): extract the actual spells from official sites/stores or YouTube. The local review packages 16 individually reviewed gameplay GIFs, with source links, cut times, publisher/uploader credits and version/combination caveats. This replaces the earlier similar-effect-only assignments. Copyright is retained; this local-review instruction does not establish release redistribution permission.
 >
 > Contract shape: standard
+>
+> Selection camera behavior: every magic-list click, including reselecting the current entry, fits the effect range with a short transition. Whole-domain spells fit the analysis area; other shapes use an anchor-centered enclosing range. Closer zoom enlarges existing map imagery, without changing physical dimensions or configuration. Manual navigation and parameter edits do not request refocus.
 >
 > Canonical file/language: English; `water-magic-variant-spec.ja.md` is the Japanese reference.
 >
@@ -14,9 +22,15 @@
 
 Choose water magic, preview its placement and footprint on a real map, then simulate the injected water spreading across terrain during casting and a subsequent relaxation period.
 
+UI mock added 2026-10-03: see [launch instructions and validation](../mockups/water-magic/README.md).
+The existing React UI offers `/?mode=water-magic` (also the historical `/?mock=water-magic` alias), replacing city sample choices with all 16 spells while retaining its real map, domain controls and archive import.
+The reviewed UI is now connected to Full 1 m water-source execution and archive persistence. See [implementation and verification](water-magic-implementation.md) for the executable scope, limits, second-based engine forcing and numerical approximation.
+User-directed mock presentation update: each choice uses two lines, spell name with the estimated maximum volume (m³, one decimal place), then game name. Omit the quantity caption; preserve the underlying estimate range, sorting rule and configured-volume precision.
+Latest user-directed workflow: show conditions/address search and editable original latitude/longitude inputs first, magic settings second; omit image controls. Selecting a spell autoplays its assigned GIF. Address selection or coordinate edits update the domain and selected spell location. Bearing is clockwise from true north; its arrow uses the analysis-overlay projection and a draggable handle appears within 60px. Footprints use black/blue lines; whole-domain display is inset by 5 CSS pixels without reducing physical area. Circle/domain geometry is invariant under bearing; directional rectangles/sectors rotate the actual source geometry. Result time labels use seconds for casting duration <300 seconds and minutes for casting >=300 seconds, excluding relaxation from the decision. Computation remains in seconds; short casts prefer 1-second output, long casts prefer 10-second output subject to the 600-frame budget. Earlier reference-only/GIF-control requirements below are superseded by this latest user-approved implementation contract.
+
 ## Scope
 
-- A separate variant originating from the frozen main baseline; documentation only in this iteration.
+- A separate variant originating from the frozen main baseline; the initial reviewed one-spell UI and Full 1 m execution are implemented.
 - Replace historical sample-condition selection with a magic catalog and shape-specific controls.
 - Local nonnegative water injection with explicit volume, footprint and duration; existing terrain acquisition, progress and result viewing.
 - Initial implementation proposal: one cast per run, stationary footprint, no background rainfall, Full 1 m execution. Other supported regular grids require separate validation; Adaptive remains disabled.
@@ -36,7 +50,7 @@ Choose water magic, preview its placement and footprint on a real map, then simu
 - WM-04: render a per-spell animated GIF overlay and the actual injection footprint as distinct map layers. Obtain visually similar GIFs from the Web; exact game footage is optional and opaque backgrounds are acceptable. Illustration scale cannot determine injection area. Keep terrain and analysis boundary visible. Show a direction arrow where applicable. A simple symbolic illustration is allowed when an asset is unavailable, with an accessible text label. The GIF overlay requirements below govern acquisition, display and acceptance.
 - WM-05: shape controls must have numeric equivalents: disk radius; sector radius/opening angle/bearing; oriented rectangle length/width/bearing; polygon vertex edit/undo/reset. These are supported geometry proposals, not a confirmed spell list. Show only controls applicable to the selected spell. Distances use metres; bearing is clockwise from true north, independent of map rotation. A rectangle starts at its anchor and extends along its bearing, centered across its width.
 - WM-06: display total injected volume in m³, duration in seconds, average discharge in m³/s, effective injection area in m² and equivalent source depth/rate. A catalog expressed as a rate must resolve to a volume before execution; volume is not silently scaled when footprint changes.
-- WM-07: use nonnegative, spatially local forcing; zero outside the injection support and after casting ends. Do not approximate local forcing by a domain-wide average. Initial time profile is constant discharge over `[0, T_cast)`; later profiles require explicit normalized definitions.
+- WM-07: use nonnegative, spatially local forcing; zero outside support and after casting ends. Do not substitute domain-wide average rain. The implemented engine adapter uses constant discharge followed by a terminal linear decrease over `delta=min(0.1 s, T_cast/100)` and normalizes by `T_cast-delta/2` to preserve the requested volume. This declared approximation adjusts the plateau by at most 0.503%; it never injects during relaxation. See the implementation contract for eligibility and dry initial state.
 - WM-08: simulation end is `T_end = T_cast + T_relax`, with positive finite casting duration and nonnegative finite relaxation duration. Show and persist both durations and their sum. Relaxation is an editable fixed observation period in the initial proposal; no unvalidated automatic equilibrium rule.
 - WM-09: freeze all inputs and the resolved footprint when execution starts. Changing setup or selecting a spell invalidates an older preview. Returning to setup retains editable values; rerunning creates a new run identity.
 - WM-10: in results distinguish casting from relaxation, keep the footprint available as a toggle, and reuse native depth/velocity/timeline/point inspection. Maximum results cover the entire simulation. Never depict preview artwork as calculated inundation.
@@ -236,3 +250,22 @@ Metadata above is discovery evidence from 2026-10-03, not a substitute for valid
 | wow-elemental | G-B | Temporary water-body proxy; prefer humanoid water |
 
 The table is an acquisition worklist covering every spell, not final artwork approval. Replace unsuitable candidates before acceptance; shared placeholders cannot be presented as completed per-spell visual verification. Reference-only physics status does not prevent an illustrative GIF preview.
+
+
+## 2026-10-03: 最新のカタログと結果表示
+
+利用者の追加指示により、最大水量5 m³以下を選択肢から除外。残る8件と追加6件の14件を最大水量の昇順、同量はID順に並べる。旧IDは保存結果の互換性のため保持する。DQVIIのメイルストロムを初期選択とする。全選択肢に実ゲーム映像の自動再生GIFと作品アイコンを登録する。推定値は公式体積ではない。以前の下限優先順・全16件選択の記述を置き換える。[推定根拠と水深高速化](water-magic-volume-expansion.md)を参照。水深専用経路は選択した実出力時刻のhだけを読み、固定色分けを再利用する。
+
+
+## 2026-10-04: Initial-only momentum and vortices
+
+Per the user's new instruction, initial placement supplies all water and horizontal velocity once. Motion options are still, directional, radial and vortex, with editable handedness and core radius. Speed is0–4m/s. No continuing momentum or water source follows. Earlier exclusions of momentum now apply to continuous injection only. Old archives restore continuous water and zero initial speed. See the [additional contract and validation](water-magic-initial-momentum.md).
+
+
+## 2026-10-04: Pool, kaiju and full initial placement
+
+Add a 300 m³ school pool, an inferred maximum 100000 m³ Godzilla landing wave and an inferred maximum 23000 m³ Titanosaurus vortex. All 17 selectable presets, including Rain, default to placing the entire volume at time zero with no subsequent source water. New Analysis defaults to initial placement; saved legacy results retain their original release mode. This supersedes the previous 14-preset count and continuous Rain default. Sources, inference limits, bundled assets and native 0.5 m engine/browser evidence: [additional contract](water-magic-pool-kaiju.md).
+
+## 2026-10-04: Top-ten depth and speed navigation
+
+Depth and speed buttons independently cycle up to ten distinct native locations and jump to each retained peak output time. Point details show rank and kinetic-energy-equivalent speed for a Prius or sumo wrestler, in km/h. Source-backed ranking uses bounded frame/chunk reads and persistent summaries. [Contract and real-data/browser validation](result-extrema-navigation.md).

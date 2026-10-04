@@ -9,6 +9,7 @@ import numpy as np
 import xarray as xr
 
 from floodsim.domain.geometry import AnalysisArea
+from floodsim.results.flow_field import native_flow_field
 from floodsim.results.regular_netcdf_source import (
     RegularNetcdfSource,
     validate_source_identity,
@@ -36,6 +37,7 @@ def regular_flow_viewport(
     north: float,
     stride: int,
     speed_scale: dict[str, Any],
+    include_field: bool = False,
 ) -> dict[str, Any]:
     if not 0 <= time_index < len(source.time_values):
         raise ResultTimeIndexInvalid("result time index is outside available output")
@@ -106,6 +108,7 @@ def regular_flow_viewport(
         source.block_size_m,
         u[None],
         v[None],
+        display_dry_threshold_m=source.display_dry_threshold_m,
     )
     payload = flow_vectors_viewport_geojson(
         arrays,
@@ -124,4 +127,9 @@ def regular_flow_viewport(
         feature["properties"]["time_index"] = time_index
     payload["metadata"]["read_window_cells"] = (r1 - r0) * (c1 - c0)
     payload["metadata"]["display_max_speed_mps"] = speed_scale["maximum"]
+    if include_field and source.block_size_m == 0.5:
+        payload["flow_field"] = native_flow_field(
+            u, v, active & (depth >= source.display_dry_threshold_m), area=area,
+            cell_size_m=source.block_size_m, window_origin=(r0, c0),
+        )
     return payload

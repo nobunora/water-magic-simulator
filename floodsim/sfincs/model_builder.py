@@ -20,10 +20,13 @@ import xarray as xr
 from pyproj import CRS
 
 from floodsim.domain.rainfall import RainfallTimeSeries
+from floodsim.domain.water_magic import MagicTimeSeries, magic_output_interval
 from floodsim.preprocessing.adaptive_grid import AdaptiveGridProduct
 from floodsim.preprocessing.full_grid import FullGridProduct
 from floodsim.sfincs.adaptive_quadtree import create_adaptive_quadtree
 from floodsim.sfincs.quadtree_writer import write_quadtree_grid_compat
+from floodsim.sfincs.water_magic_forcing import MagicForcingError, write_magic_discharge
+from floodsim.sfincs.water_magic_initial import write_magic_initial_state
 from floodsim.storage.run_store import atomic_write_json
 
 if TYPE_CHECKING:
@@ -184,7 +187,7 @@ class SfincsModelBuilder:
         self,
         model_dir: str | Path,
         grid: FullGridProduct,
-        rainfall: RainfallTimeSeries,
+        rainfall: RainfallTimeSeries | MagicTimeSeries,
     ) -> ModelBuildResult:
         root = Path(model_dir)
         root.mkdir(parents=True, exist_ok=True)
@@ -230,7 +233,11 @@ class SfincsModelBuilder:
             model.roughness.create([{"manning": roughness}])
 
             duration_seconds = float(rainfall.elapsed_seconds[-1])
-            output_interval = self._output_interval_seconds(duration_seconds)
+            output_interval = (
+                magic_output_interval(rainfall.config.casting_seconds, rainfall.config.relaxation_seconds)
+                if isinstance(rainfall, MagicTimeSeries)
+                else self._output_interval_seconds(duration_seconds)
+            )
             start = _sfincs_datetime(rainfall.start_time)
             stop = start + timedelta(seconds=duration_seconds)
             stamp = "%Y%m%d %H%M%S"
@@ -247,7 +254,22 @@ class SfincsModelBuilder:
             model.config.set("storecumprcp", 0)
             model.config.set("storevel", 1)
 
-            _configure_precipitation(model, _precipitation(rainfall, grid), rainfall)
+            if isinstance(rainfall, MagicTimeSeries):
+                if rainfall.config.release_mode == "initial":
+                    model.config.set("rstfile", "water_magic_initial.rst")
+                else:
+                    source_report = write_magic_discharge(root, rainfall, grid)
+                    rainfall.source_metadata["source_report_json"] = json.dumps(source_report)
+                    model.config.set("srcfile", "water_magic.src")
+                    model.config.set("disfile", "water_magic.dis")
+                # Maximum-volume narrow sources need finer steps to conserve
+                # water during wetting; verified against 0.003 s convergence.
+                model.config.set("dtmax", min(0.01, rainfall.config.transition_seconds))
+                model.config.set("huthresh", 0.000001)
+                # Start dry even when terrain elevations are below sea level.
+                model.config.set("zsini", float(np.min(grid.elevation_m[grid.sfincs_mask > 0])) - 1.0)
+            else:
+                _configure_precipitation(model, _precipitation(rainfall, grid), rainfall)
             neumann_boundary_compatibility = _configure_neumann_boundary_compatibility(
                 model,
                 root,
@@ -255,7 +277,10 @@ class SfincsModelBuilder:
                 duration_seconds,
             )
             model.write()
-        except ModelBuildError:
+            if isinstance(rainfall, MagicTimeSeries) and rainfall.config.release_mode == "initial":
+                source_report = write_magic_initial_state(root, rainfall, grid)
+                rainfall.source_metadata["source_report_json"] = json.dumps(source_report)
+        except (ModelBuildError, MagicForcingError):
             raise
         except Exception as exc:
             raise ModelBuildError(
@@ -293,6 +318,14 @@ class SfincsModelBuilder:
             },
             "warnings": [],
         }
+        if isinstance(rainfall, MagicTimeSeries):
+            report["water_magic"] = json.loads(rainfall.source_metadata["source_report_json"])
+            report["numerics"] = {"alpha": 0.70, "huthresh_m": 0.000001, "initial_state": "wet_restart" if rainfall.config.release_mode == "initial" else "dry",
+                "dtmax_seconds": min(0.01, rainfall.config.transition_seconds)}
+            forcing_files = ["water_magic_initial.rst"] if rainfall.config.release_mode == "initial" else ["water_magic.src", "water_magic.dis"]
+            forcing_hash = hashlib.sha256(b"".join((root / name).read_bytes() for name in forcing_files)).hexdigest()
+            report["forcing_sha256"] = forcing_hash
+            rainfall.source_metadata["forcing_sha256"] = forcing_hash
         report_path = root / "model_build_report.json"
         atomic_write_json(report_path, report)
         return ModelBuildResult(root, report_path, report)

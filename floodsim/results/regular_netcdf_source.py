@@ -37,7 +37,7 @@ def regular_speed_reference(
                         u = np.asarray(dataset["u"].isel({"time": time, **window}).values)
                         v = np.asarray(dataset["v"].isel({"time": time, **window}).values)
                         speed = np.hypot(u, v)
-                        wet = active & np.isfinite(depth) & (depth > 0.01) & np.isfinite(speed)
+                        wet = active & np.isfinite(depth) & (depth > source.display_dry_threshold_m) & np.isfinite(speed)
                         peak = np.fmax(peak, np.where(wet, speed, np.nan))
                     values, counts = np.unique(peak[np.isfinite(peak)], return_counts=True)
                     for value, count in zip(values, counts, strict=True):
@@ -64,6 +64,7 @@ class RegularNetcdfSource:
     variable_names: dict[str, str]
     chunk_shape: tuple[int, int, int]
     flow_vectors_available: bool
+    display_dry_threshold_m: float = 0.01
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -81,6 +82,7 @@ class RegularNetcdfSource:
             "variable_names": self.variable_names,
             "chunk_shape": list(self.chunk_shape),
             "flow_vectors_available": self.flow_vectors_available,
+            "display_dry_threshold_m": self.display_dry_threshold_m,
             "cache_schema_revision": CACHE_SCHEMA_REVISION,
         }
 
@@ -91,6 +93,7 @@ def inspect_regular_netcdf_source(
     model_dir: str | Path,
     bounds: dict[str, float],
     block_size_m: float,
+    display_dry_threshold_m: float = 0.01,
 ) -> RegularNetcdfSource:
     """Inspect dimensions and encoding without materialising a result grid."""
     path = Path(source_path).resolve()
@@ -143,6 +146,7 @@ def inspect_regular_netcdf_source(
         },
         chunk_shape=(int(chunk_shape[0]), int(chunk_shape[1]), int(chunk_shape[2])),
         flow_vectors_available=has_u,
+        display_dry_threshold_m=display_dry_threshold_m,
     )
 
 
@@ -188,11 +192,14 @@ def load_regular_netcdf_descriptor(path: str | Path) -> RegularNetcdfSource:
                 int(payload["chunk_shape"][2]),
             ),
             flow_vectors_available=bool(payload["flow_vectors_available"]),
+            display_dry_threshold_m=float(payload.get("display_dry_threshold_m", 0.01)),
         )
     except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
         raise RegularNetcdfSourceError("NetCDF descriptor is invalid") from exc
     if (
-        len(descriptor.chunk_shape) != 3
+        not np.isfinite(descriptor.display_dry_threshold_m)
+        or descriptor.display_dry_threshold_m <= 0
+        or len(descriptor.chunk_shape) != 3
         or any(value <= 0 for value in descriptor.chunk_shape)
         or descriptor.source_filename.startswith("/")
         or ".." in Path(descriptor.source_filename).parts
@@ -289,6 +296,7 @@ def regular_window_arrays(
         grid_resolution_m=descriptor.block_size_m,
         velocity_u_mps=(velocity_u[None, :, :] if velocity_u is not None else None),
         velocity_v_mps=(velocity_v[None, :, :] if velocity_v is not None else None),
+        display_dry_threshold_m=descriptor.display_dry_threshold_m,
     )
 
 
@@ -347,7 +355,7 @@ def scan_regular_diagnostics(source: RegularNetcdfSource, *, model_dir: str | Pa
                             maximum[missing] = np.maximum(maximum[missing], np.max(depth[:, missing], axis=0))
                     if np.any(active):
                         global_max = max(global_max, float(np.nanmax(np.where(active, maximum, np.nan))))
-                    visible = maximum[active & np.isfinite(maximum) & (maximum >= 0.01)]
+                    visible = maximum[active & np.isfinite(maximum) & (maximum >= source.display_dry_threshold_m)]
                     if visible.size:
                         minimum_visible_depth = min(minimum_visible_depth, float(np.min(visible)))
     except RegularNetcdfSourceError:
@@ -359,7 +367,7 @@ def scan_regular_diagnostics(source: RegularNetcdfSource, *, model_dir: str | Pa
         "finite_hmax_cells": finite_hmax_cells,
         "hmax_reconstructed_cells": reconstructed_cells,
         "global_max_depth_m": global_max,
-        "min_visible_depth_m": 0.01 if not np.isfinite(minimum_visible_depth) else minimum_visible_depth,
+        "min_visible_depth_m": source.display_dry_threshold_m if not np.isfinite(minimum_visible_depth) else minimum_visible_depth,
         "terrain_min_elevation_m": terrain_min,
         "terrain_max_elevation_m": terrain_max,
     }

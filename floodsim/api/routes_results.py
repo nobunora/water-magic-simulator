@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import tempfile
 from functools import lru_cache
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 import numpy as np
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
+from pyproj import CRS, Transformer
 from starlette.background import BackgroundTask
 
 from floodsim.api.errors import ApiContractError
@@ -21,25 +24,34 @@ from floodsim.api.runtime_config import demo_archive_path, runtime_config
 from floodsim.api.schemas import (
     ElevationPreviewRequest,
     ElevationPreviewResponse,
+    PointEnergyResponse,
     PointInspectionResponse,
+    ResultEnergyJobResponse,
+    ResultExtremaJobResponse,
+    ResultExtremaResponse,
     ResultImportResponse,
     ResultMetadataResponse,
 )
 from floodsim.domain.geometry import AnalysisArea
 from floodsim.orchestration.run_coordinator import ResultNotReady, RunNotFound
-from floodsim.providers.common import ProviderError
+from floodsim.providers.common import ProviderError, local_crs
 from floodsim.results.adaptive_scale import generate_adaptive_breaks
 from floodsim.results.archive import ResultArchiveError, create_result_archive
 from floodsim.results.elevation_preview import ElevationPreviewStore
+from floodsim.results.energy_jobs import EnergyJobs
+from floodsim.results.extrema import array_extrema, regular_extrema
+from floodsim.results.outflow_energy import regular_energy
 from floodsim.results.regular_flow import regular_flow_viewport
 from floodsim.results.regular_netcdf_source import (
     RegularNetcdfSourceError,
     load_regular_netcdf_descriptor,
     regular_speed_reference,
     regular_window_arrays,
+    validate_source_identity,
 )
 from floodsim.results.regular_queries import (
     inspect_regular_point,
+    regular_depth_png,
     regular_elevation_png,
     regular_grid_png,
     saved_speed_scale,
@@ -68,6 +80,8 @@ MAX_ARCHIVE_UPLOAD_BYTES = 8 * 1024**3
 _demo_result_runs: dict[str, UUID] = {}
 _demo_result_lock = Lock()
 _elevation_previews = ElevationPreviewStore()
+_energy_jobs = EnergyJobs()
+_extrema_jobs = EnergyJobs(result_fields=("depth", "speed"), failure_message="水深・流速の集計に失敗しました。")
 
 
 def _map_result_error(exc: Exception) -> ApiContractError:
@@ -131,6 +145,17 @@ def _arrays_path_for_run(run_id: UUID) -> tuple[Path, int]:
     return path, path.stat().st_mtime_ns
 
 
+@lru_cache(maxsize=8)
+def _static_arrays_cached(path: str, mtime_ns: int, layer: Literal["elevation", "grid_resolution"]) -> ResultArrays:
+    del mtime_ns
+    return load_normalized_arrays(path, static_layer=layer)
+
+
+def _static_arrays_for_run(run_id: UUID, layer: Literal["elevation", "grid_resolution"]) -> ResultArrays:
+    path, mtime_ns = _arrays_path_for_run(run_id)
+    return _static_arrays_cached(str(path), mtime_ns, layer)
+
+
 def _arrays_for_run(run_id: UUID) -> ResultArrays:
     try:
         try:
@@ -191,6 +216,127 @@ def result_metadata(run_id: UUID) -> ResultMetadataResponse:
     metadata["elevation_legend"] = elevation_legend_metadata(minimum_m, maximum_m, scale=arrays.elevation_scale)
     metadata["display_scales"] = {"depth": arrays.depth_scale.to_metadata(), "elevation": arrays.elevation_scale.to_metadata()}
     return ResultMetadataResponse.model_validate(metadata)
+
+
+def _extrema_context(run_id: UUID):
+    area = coordinator.get(run_id).config.analysis_area
+    metadata = coordinator.result_metadata(run_id)
+    times = sorted({index for index in metadata["available_time_indices"]
+                    if 0 <= index < len(metadata["time_values"])})
+    try:
+        source_path = coordinator.result_source_path(run_id)
+    except ResultNotReady:
+        source_path = None
+    source = load_regular_netcdf_descriptor(source_path) if source_path is not None else None
+    model_dir = coordinator.store.run_dir(run_id) / "model"
+    if source is not None:
+        validate_source_identity(source, model_dir=model_dir)
+    identity = json.dumps({"source": source.to_json() if source is not None else metadata,
+                           "area": area.model_dump(), "times": times}, sort_keys=True)
+    key = f"{run_id}:{hashlib.sha256(identity.encode()).hexdigest()}"
+    return key, source, model_dir, area, times
+
+
+@router.get("/runs/{run_id}/result-extrema", response_model=ResultExtremaResponse)
+def result_extrema(run_id: UUID) -> ResultExtremaResponse:
+    try:
+        _, source, model_dir, area, times = _extrema_context(run_id)
+        if source is not None:
+            payload = regular_extrema(source, model_dir=model_dir, area=area, times=times)
+        else:
+            payload = array_extrema(_arrays_for_run(run_id), area=area, times=times)
+        return ResultExtremaResponse.model_validate(payload)
+    except (RunNotFound, ResultNotReady, ResultViewError, RegularNetcdfSourceError, OSError) as exc:
+        raise _map_result_error(exc) from exc
+
+
+@router.post("/runs/{run_id}/result-extrema", response_model=ResultExtremaJobResponse)
+def start_result_extrema(run_id: UUID) -> ResultExtremaJobResponse:
+    try:
+        key, source, model_dir, area, times = _extrema_context(run_id)
+        state = _extrema_jobs.start(key, 0, lambda progress: (
+            regular_extrema(source, model_dir=model_dir, area=area, times=times, progress=progress)
+            if source is not None else
+            array_extrema(_arrays_for_run(run_id), area=area, times=times, progress=progress)))
+        return ResultExtremaJobResponse.model_validate(state)
+    except ValueError as exc:
+        raise ApiContractError(400, "EXTREMA_UNAVAILABLE", str(exc)) from exc
+    except (RunNotFound, ResultNotReady, ResultViewError, RegularNetcdfSourceError, OSError) as exc:
+        raise _map_result_error(exc) from exc
+
+
+@router.get("/runs/{run_id}/result-extrema/progress", response_model=ResultExtremaJobResponse)
+def result_extrema_status(run_id: UUID) -> ResultExtremaJobResponse:
+    try:
+        key, _, _, _, _ = _extrema_context(run_id)
+        state = _extrema_jobs.get(key)
+        if state is None:
+            raise ApiContractError(404, "EXTREMA_NOT_STARTED", "水深・流速の集計を開始してください。")
+        return ResultExtremaJobResponse.model_validate(state)
+    except (RunNotFound, ResultNotReady, ResultViewError, RegularNetcdfSourceError, OSError) as exc:
+        raise _map_result_error(exc) from exc
+
+
+def _energy_context(run_id: UUID):
+    area = coordinator.get(run_id).config.analysis_area
+    metadata = coordinator.result_metadata(run_id)
+    source_path = coordinator.result_source_path(run_id)
+    source = load_regular_netcdf_descriptor(source_path)
+    times = sorted({index for index in metadata["available_time_indices"]
+                    if 0 <= index < len(source.time_values)})
+    model_dir = coordinator.store.run_dir(run_id) / "model"
+    validate_source_identity(source, model_dir=model_dir)
+    identity = json.dumps({"source": source.to_json(), "area": area.model_dump(), "times": times}, sort_keys=True)
+    key = f"{run_id}:{hashlib.sha256(identity.encode()).hexdigest()}"
+    return key, source, model_dir, area, times
+
+
+@router.post("/runs/{run_id}/result-energy", response_model=ResultEnergyJobResponse)
+def start_result_energy(run_id: UUID) -> ResultEnergyJobResponse:
+    try:
+        key, source, model_dir, area, times = _energy_context(run_id)
+        state = _energy_jobs.start(key, len(times), lambda progress: regular_energy(
+            source, model_dir=model_dir, area=area, times=times, progress=progress, retain_totals=True))
+        return ResultEnergyJobResponse.model_validate(state)
+    except ValueError as exc:
+        raise ApiContractError(400, "ENERGY_UNAVAILABLE", str(exc)) from exc
+    except (RunNotFound, ResultNotReady, ResultViewError, RegularNetcdfSourceError, OSError) as exc:
+        raise _map_result_error(exc) from exc
+
+
+@router.get("/runs/{run_id}/result-energy", response_model=ResultEnergyJobResponse)
+def result_energy_status(run_id: UUID) -> ResultEnergyJobResponse:
+    try:
+        key, _, _, _, _ = _energy_context(run_id)
+        state = _energy_jobs.get(key)
+        if state is None:
+            raise ApiContractError(404, "ENERGY_NOT_STARTED", "エネルギー集計を開始してください。")
+        return ResultEnergyJobResponse.model_validate(state)
+    except (RunNotFound, ResultNotReady, ResultViewError, RegularNetcdfSourceError, OSError) as exc:
+        raise _map_result_error(exc) from exc
+
+
+@router.get("/runs/{run_id}/result-energy/point", response_model=PointEnergyResponse)
+def result_energy_point(
+    run_id: UUID, lon: float = Query(ge=-180, le=180), lat: float = Query(ge=-90, le=90),
+) -> PointEnergyResponse:
+    try:
+        key, source, _, area, times = _energy_context(run_id)
+        x, y = Transformer.from_crs(CRS.from_epsg(4326), local_crs(area), always_xy=True).transform(lon, lat)
+        if not (-area.width_m / 2 <= x < area.width_m / 2 and -area.height_m / 2 <= y < area.height_m / 2):
+            raise PointOutsideResult("point is outside result bounds")
+        factor = round(1 / source.block_size_m)
+        if factor < 1 or not np.isclose(factor * source.block_size_m, 1):
+            raise ApiContractError(400, "ENERGY_UNAVAILABLE", "1 m区画へ分割できる格子が必要です。")
+        row = int(np.floor((y + area.height_m / 2) * source.height / area.height_m)) // factor
+        col = int(np.floor((x + area.width_m / 2) * source.width / area.width_m)) // factor
+        payload = _energy_jobs.point(key, row, col)
+        if payload is None:
+            raise ApiContractError(409, "ENERGY_NOT_READY", "エネルギー集計はまだ完了していません。")
+        return PointEnergyResponse.model_validate({**payload, "lon_deg": lon, "lat_deg": lat,
+            "row": row, "column": col, "through_time_index": times[-1], "through_time_value": source.time_values[times[-1]]})
+    except (RunNotFound, ResultNotReady, ResultViewError, RegularNetcdfSourceError, OSError) as exc:
+        raise _map_result_error(exc) from exc
 
 
 @router.post("/elevation-previews", response_model=ElevationPreviewResponse)
@@ -383,9 +529,13 @@ def time_depth_layer(
     max_px: int = 4096,
 ) -> Response:
     try:
-        source_arrays = _source_arrays_for_run(run_id, time_index)
-        if source_arrays is not None:
-            content = render_time_depth_png(source_arrays, time_index=0, max_px=max_px)
+        try:
+            source_path = coordinator.result_source_path(run_id)
+        except ResultNotReady:
+            source_path = None
+        if source_path is not None:
+            content = regular_depth_png(load_regular_netcdf_descriptor(source_path),
+                coordinator.store.run_dir(run_id) / "model", time_index, max_px)
         else:
             path, mtime_ns = _arrays_path_for_run(run_id)
             content = _render_time_depth_cached(str(path), mtime_ns, time_index, max_px)
@@ -409,7 +559,7 @@ def grid_resolution_layer(run_id: UUID, max_px: int = 4096) -> Response:
             content = regular_grid_png(load_regular_netcdf_descriptor(source_path),
                 coordinator.store.run_dir(run_id) / "model", max_px)
         else:
-            content = render_grid_resolution_png(_arrays_for_run(run_id), max_px=max_px)
+            content = render_grid_resolution_png(_static_arrays_for_run(run_id, "grid_resolution"), max_px=max_px)
     except (RunNotFound, ResultViewError, RegularNetcdfSourceError, OSError) as exc:
         raise _map_result_error(exc) from exc
     return Response(content=content, media_type="image/png", headers=LAYER_CACHE_HEADERS)
@@ -426,7 +576,7 @@ def elevation_layer(run_id: UUID, max_px: int = 4096) -> Response:
             content = regular_elevation_png(load_regular_netcdf_descriptor(source_path),
                 coordinator.store.run_dir(run_id) / "model", max_px)
         else:
-            content = render_terrain_elevation_png(_arrays_for_run(run_id), max_px=max_px)
+            content = render_terrain_elevation_png(_static_arrays_for_run(run_id, "elevation"), max_px=max_px)
     except (RunNotFound, ResultViewError, RegularNetcdfSourceError, OSError) as exc:
         raise _map_result_error(exc) from exc
     return Response(content=content, media_type="image/png", headers=LAYER_CACHE_HEADERS)
@@ -445,6 +595,7 @@ def flow_vectors_geojson_layer(
     east: float = Query(ge=-180, le=180),
     north: float = Query(ge=-90, le=90),
     stride: int = Query(default=8, ge=1, le=4096),
+    include_field: bool = Query(default=False),
 ) -> JSONResponse:
     try:
         record = coordinator.get(run_id)
@@ -468,6 +619,7 @@ def flow_vectors_geojson_layer(
                 north=north,
                 stride=stride,
                 speed_scale=speed_scale,
+                include_field=include_field,
             )
         else:
             path, mtime_ns = _arrays_path_for_run(run_id)

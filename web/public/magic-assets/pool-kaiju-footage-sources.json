@@ -1,0 +1,29 @@
+{
+  "clips": [
+    {
+      "spell_id": "kaiju-godzilla-wave",
+      "file": "WFEvriJDjYc.mp4",
+      "source": "https://www.youtube.com/watch?v=WFEvriJDjYc",
+      "channel": "WALL E MOVIECLIPS, TV CLIPS & SFX",
+      "rights_holder": "Warner Bros. / Legendary / TOHO",
+      "source_kind": "film",
+      "start_seconds": 165,
+      "end_seconds": 169,
+      "still_seconds": 166,
+      "exposure_gamma": 1.6,
+      "caption": "映画の上陸時の波。暗い場面は視認性のため明るさを補正。水量・範囲は仮定。"
+    },
+    {
+      "spell_id": "kaiju-titanosaurus-vortex",
+      "file": "ZfbTB7bu6aI.mp4",
+      "source": "https://www.youtube.com/watch?v=ZfbTB7bu6aI",
+      "channel": "GODZILLA OFFICIAL by TOHO",
+      "rights_holder": "TOHO",
+      "source_kind": "official",
+      "start_seconds": 19,
+      "end_seconds": 23,
+      "still_seconds": 21,
+      "caption": "公式予告編の怪獣紹介。海中の渦そのものの映像ではありません。渦の能力は公式図鑑の説明を根拠とします。"
+    }
+  ]
+}

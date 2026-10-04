@@ -73,6 +73,39 @@ def _write_result(path: Path) -> None:
     ).to_netcdf(path)
 
 
+def test_magic_submillimetre_depth_is_visible_and_threshold_is_portable(tmp_path: Path) -> None:
+    from io import BytesIO
+
+    from PIL import Image
+
+    from floodsim.results.regular_netcdf_source import load_regular_netcdf_descriptor
+    from floodsim.results.view import render_max_depth_png
+
+    model = tmp_path / "model"
+    model.mkdir()
+    path = model / "sfincs_map.nc"
+    _write_result(path)
+    with xr.open_dataset(path) as original:
+        dataset = original.load()
+    dataset["h"].values[:] *= 0.0001
+    dataset["hmax"].values[:] *= 0.0001
+    dataset.to_netcdf(path)
+    rain = inspect_regular_netcdf_source(path, model_dir=model,
+        bounds={"west": 0, "south": 0, "east": 1, "north": 1}, block_size_m=1)
+    magic = replace(rain, display_dry_threshold_m=1e-6)
+    descriptor = tmp_path / "source.json"
+    import json
+    descriptor.write_text(json.dumps(magic.to_json()), encoding="utf-8")
+    restored = load_regular_netcdf_descriptor(descriptor)
+    assert restored.display_dry_threshold_m == 1e-6
+    diagnostic = scan_regular_diagnostics(restored, model_dir=model)
+    assert diagnostic["min_visible_depth_m"] < .001
+    rain_image = Image.open(BytesIO(render_max_depth_png(regular_window_arrays(rain, model_dir=model, time_index=0))))
+    magic_image = Image.open(BytesIO(render_max_depth_png(regular_window_arrays(restored, model_dir=model, time_index=0))))
+    assert np.asarray(rain_image)[..., 3].max() == 0
+    assert np.asarray(magic_image)[..., 3].max() > 0
+
+
 def test_descriptor_is_relative_and_diagnostics_are_chunk_bounded(
     tmp_path: Path,
 ) -> None:

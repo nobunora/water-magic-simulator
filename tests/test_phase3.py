@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
@@ -105,6 +106,21 @@ def _vectors(area: AnalysisArea, *, with_building: bool = True) -> SimpleNamespa
         road_polygons=[],
         provenance=_provenance("plateau", area),
     )
+
+
+def test_half_metre_grid_builds_four_cells_per_square_metre() -> None:
+    area = _area()
+    elevation = replace(_elevation(area), z=np.zeros((9, 9), dtype=np.float32),
+        x=np.linspace(-2, 2, 9), y=np.linspace(-2, 2, 9), source=np.ones((9, 9), dtype=np.uint8))
+    updates = []
+    grid = build_full_1m_grid(area, elevation, _vectors(area), grid_m=0.5,
+        progress_callback=lambda fraction, message: updates.append(message))
+    assert grid.elevation_m.shape == (8, 8)
+    assert grid.cell_count == 64
+    assert grid.dx_m == grid.dy_m == 0.5
+    assert np.all(grid.sfincs_mask[grid.building_mask] == 0)
+    assert grid.roof_allocation.hydraulic_weighted_area_m2 == pytest.approx(16)
+    assert "0.5 m" in updates[-1]
 
 
 def test_roof_rainfall_conserves_mass_and_blocks_roof() -> None:

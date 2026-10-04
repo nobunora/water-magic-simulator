@@ -778,7 +778,14 @@ class RunCoordinator:
                 )
             self._check_cancel(record)
 
-            self._set_state(record, RunState.ACQUIRING_RAINFALL, "降雨シナリオを時間系列へ変換しています。")
+            magic = record.config.water_magic
+            if magic is not None and magic.release_mode == "initial":
+                source_message = "魔法の初期水量・初速と、秒単位の追跡時間を準備しています。"
+            elif magic is not None:
+                source_message = "魔法の発動・停止・緩和を秒単位の給水系列へ変換しています。"
+            else:
+                source_message = "降雨シナリオを時間系列へ変換しています。"
+            self._set_state(record, RunState.ACQUIRING_RAINFALL, source_message)
             rainfall = self.rainfall_resolver(record.config, self.catalog_provider)
             self._check_cancel(record)
             self._finish_major_phase(record, "データ取得")
@@ -960,6 +967,9 @@ class RunCoordinator:
                     f"HydroMT-SFINCSで均一{grid.dx_m:g} mモデルを構築しています。",
                 )
                 build = self.model_builder.build(run_root / "model", grid, rainfall)
+            if record.config.water_magic is not None:
+                record.manifest = record.manifest.model_copy(update={"rainfall_source": dict(rainfall.source_metadata)})
+                self._persist_manifest(record)
             self._append_activity(record, "SFINCSモデル構築完了。")
             self._check_cancel(record)
 
@@ -1043,6 +1053,7 @@ class RunCoordinator:
                     model_dir=execution.result_path.parent,
                     bounds=record.config.analysis_area.bounds.model_dump(),
                     block_size_m=grid.dx_m,
+                    display_dry_threshold_m=0.000001 if record.config.water_magic else 0.01,
                 )
 
             provider_summary: dict[str, Any] = {

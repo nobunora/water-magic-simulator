@@ -278,6 +278,66 @@ class ResultMetadataResponse(BaseModel):
     limitations: dict[str, bool]
 
 
+class ResultExtremeLocation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rank: int = Field(ge=1, le=10)
+    cell_index: int = Field(ge=0)
+    lon_deg: float
+    lat_deg: float
+    time_index: int = Field(ge=0)
+    time_value: str
+    depth_m: float = Field(ge=0)
+    speed_mps: float | None = Field(default=None, ge=0)
+    cell_area_m2: float = Field(gt=0)
+    total_energy_j: float | None = Field(default=None, ge=0)
+    total_outflow_m3: float | None = Field(default=None, ge=0)
+
+
+class ResultExtremaResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    depth: list[ResultExtremeLocation]
+    speed: list[ResultExtremeLocation]
+
+
+class ResultExtremaJobResponse(ResultExtremaResponse):
+    status: Literal["queued", "running", "complete", "failed"]
+    progress_percent: int = Field(ge=0, le=100)
+    processed_frames: int = Field(ge=0)
+    total_frames: int = Field(ge=0)
+    error: str | None = None
+
+
+class ResultEnergyJobResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["queued", "running", "complete", "failed"]
+    progress_percent: int = Field(ge=0, le=100)
+    processed_frames: int = Field(ge=0)
+    total_frames: int = Field(ge=0)
+    energy: list[ResultExtremeLocation] = Field(default_factory=list)
+    aggregation_buffer_bytes: int = Field(default=0, ge=0)
+    method: str = ""
+    error: str | None = None
+
+
+class PointEnergyResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    lon_deg: float = Field(ge=-180, le=180)
+    lat_deg: float = Field(ge=-90, le=90)
+    has_data: bool
+    row: int = Field(ge=0)
+    column: int = Field(ge=0)
+    cell_area_m2: float = Field(default=1, gt=0)
+    total_energy_j: float | None = Field(default=None, ge=0)
+    total_outflow_m3: float | None = Field(default=None, ge=0)
+    rank: int | None = Field(default=None, ge=1)
+    through_time_index: int = Field(ge=0)
+    through_time_value: str
+
+
 class PointInspectionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -289,6 +349,7 @@ class PointInspectionResponse(BaseModel):
     time_index: int | None = Field(default=None, ge=0)
     time_value: str | None = None
     depth_m: float | None = None
+    speed_mps: float | None = Field(default=None, ge=0)
     max_depth_m: float | None = None
     max_time_index: int | None = Field(default=None, ge=0)
     max_time_value: str | None = None

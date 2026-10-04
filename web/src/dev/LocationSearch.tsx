@@ -9,9 +9,10 @@ import {
 type Props = {
   disabled: boolean;
   onSelect: (lon: number, lat: number) => void;
+  allowManualCoordinates?: boolean;
 };
 
-export default function LocationSearch({ disabled, onSelect }: Props) {
+export default function LocationSearch({ disabled, onSelect, allowManualCoordinates = true }: Props) {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<GeocodeResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -48,12 +49,12 @@ export default function LocationSearch({ disabled, onSelect }: Props) {
       const next = await searchLocation(trimmed, controller.signal);
       setResult(next);
       if (next.candidates.length === 0) {
-        setError("候補が見つかりませんでした。緯度経度を直接入力できます。");
+        setError(allowManualCoordinates ? "候補が見つかりませんでした。緯度経度を直接入力できます。" : "候補が見つかりませんでした。住所・地名を変えて再検索してください。");
       }
     } catch (cause: unknown) {
       if (controller.signal.aborted) return;
       setResult(null);
-      setError("住所・地名検索を利用できません。緯度経度を直接入力できます。");
+      setError(allowManualCoordinates ? "住所・地名検索を利用できません。緯度経度を直接入力できます。" : "住所・地名検索を利用できません。時間をおいて再検索してください。");
     } finally {
       if (requestRef.current === controller) {
         requestRef.current = null;

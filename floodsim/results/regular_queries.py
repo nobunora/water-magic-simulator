@@ -21,8 +21,10 @@ from floodsim.results.regular_netcdf_source import (
     validate_source_identity,
 )
 from floodsim.results.view import (
+    NormalizedArrays,
     PointOutsideResult,
     ResultTimeIndexInvalid,
+    render_depth_values_png,
     render_elevation_values_png,
     render_regular_grid_resolution_png,
 )
@@ -89,7 +91,7 @@ def prepare_regular_queries(
                         v = dataset["v"].isel({"time": time, **window}).values
                         speed = np.hypot(u, v)
                         peak = np.fmax(
-                            peak, np.where(active & (depth > 0.01), speed, np.nan)
+                            peak, np.where(active & (depth > source.display_dry_threshold_m), speed, np.nan)
                         )
                 stored_max = (
                     dataset["hmax"].isel(window).max(dim="timemax", skipna=True).values
@@ -137,6 +139,15 @@ def _point_cached(
             "max_time_index": int(np.nanargmax(series)),
             "terrain_elevation_m": float(dataset["zb"].isel(cell).values),
         }
+
+
+@lru_cache(maxsize=2048)
+def _point_speed_cached(path_text: str, size: int, mtime: int, row: int, col: int, time: int) -> float | None:
+    del size, mtime
+    with xr.open_dataset(path_text) as dataset:
+        cell = {"n": row, "m": col, "time": time}
+        speed = float(np.hypot(dataset["u"].isel(cell).values, dataset["v"].isel(cell).values))
+        return speed if np.isfinite(speed) else None
 
 
 def inspect_regular_point(
@@ -217,6 +228,11 @@ def inspect_regular_point(
         if point["has_data"] and time_index is not None:
             payload["depth_m"] = float(point["series"][time_index])
     if payload["has_data"]:
+        if time_index is not None and source.flow_vectors_available:
+            payload["speed_mps"] = 0.0 if payload["depth_m"] <= source.display_dry_threshold_m else _point_speed_cached(
+                str(validate_source_identity(source, model_dir=model_dir)), source.source_size_bytes,
+                source.source_mtime_ns, row, col, time_index,
+            )
         payload["max_time_value"] = source.time_values[payload["max_time_index"]]
         payload["grid_resolution_m"] = source.block_size_m
     return payload
@@ -275,7 +291,7 @@ def _grid_cached(path: str, size: int, mtime: int, root_text: str,
                  resolution_m: float, max_px: int) -> bytes:
     del size, mtime
     root = Path(root_text)
-    cached_png = root / f"grid-{resolution_m}-{max_px}.png"
+    cached_png = root / f"grid-v2-{resolution_m}-{max_px}.png"
     if cached_png.is_file():
         return cached_png.read_bytes()
     if (root / "complete.json").is_file():
@@ -304,3 +320,39 @@ def saved_speed_scale(
         if marker.is_file()
         else None
     )
+
+
+def regular_depth_png(source: RegularNetcdfSource, model_dir: str | Path,
+                      time_index: int, max_px: int) -> bytes:
+    """Selected h frame only; reuse static mask/maxima without hmax reconstruction."""
+    if not 0 <= time_index < len(source.time_values):
+        raise ResultTimeIndexInvalid("result time index is outside available output")
+    path = validate_source_identity(source, model_dir=model_dir)
+    root = prepare_regular_queries(source, model_dir=model_dir)
+    return _depth_png_cached(str(path), source.source_size_bytes, source.source_mtime_ns,
+                         str(root), source.block_size_m, source.display_dry_threshold_m,
+                         time_index, max_px)
+
+
+@lru_cache(maxsize=8)
+def _depth_reference(root_text: str, resolution_m: float, dry_threshold_m: float) -> NormalizedArrays:
+    root = Path(root_text)
+    active = np.load(root / "active.npy", mmap_mode="r")
+    maximum = np.load(root / "maximum.npy", mmap_mode="r")
+    arrays = NormalizedArrays(np.empty((0, *active.shape), dtype=np.float32), maximum,
+                              np.zeros(active.shape, dtype=np.float32), active, (), resolution_m,
+                              display_dry_threshold_m=dry_threshold_m)
+    # Compute the fixed full-run legend once, not for each selected frame.
+    _ = arrays.depth_scale
+    return arrays
+
+
+@lru_cache(maxsize=32)
+def _depth_png_cached(path: str, size: int, mtime: int, root_text: str, resolution_m: float,
+                  dry_threshold_m: float, time_index: int, max_px: int) -> bytes:
+    del size, mtime
+    reference = _depth_reference(root_text, resolution_m, dry_threshold_m)
+    with xr.open_dataset(path) as dataset:
+        depth = np.asarray(dataset["h"].isel(time=time_index).values, dtype=np.float32)
+    return render_depth_values_png(depth, reference.active_mask, reference.depth_scale,
+                                   max_px=max_px, dry_threshold_m=dry_threshold_m)

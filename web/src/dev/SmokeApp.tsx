@@ -15,12 +15,20 @@ import {
   type ElevationPreviewResponse,
   type ResultMetadataResponse,
   type RunStatusResponse,
+  type RunConfig,
 } from "../api/client";
 import ResultPanel from "../result/ResultPanel";
+import { savedMagic } from "../result/magicTime";
 import ElevationPreviewPanel from "./ElevationPreviewPanel";
 import LocationSearch from "./LocationSearch";
 import RunProgress from "./RunProgress";
 import SetupMap from "./SetupMap";
+import MagicMockPanel, { initialMagic, validMagic } from "./MagicMockPanel";
+import type { MagicPreview } from "./MagicMapPreview";
+import { spellSettings } from "./magicCatalog";
+import { minimumMagicHalfSize, recommendedMagicHalfSize } from "./magicAnalysisArea";
+import ParameterHelp from "./ParameterHelp";
+import ClippedNumberInput from "./ClippedNumberInput";
 import "./smoke.css";
 
 const TERMINAL = new Set<RunStatusResponse["state"]>(["COMPLETE", "FAILED", "CANCELLED"]);
@@ -82,10 +90,20 @@ function estimatedPeakMemoryRange(cellCount: number): string {
   return `約 ${format(lowerBytes)}〜${format(upperBytes)} GB`;
 }
 
-export default function SmokeApp() {
+export default function SmokeApp({ magicMock = false }: { magicMock?: boolean }) {
+  const activeRunStorageKey = magicMock ? `${ACTIVE_RUN_STORAGE_KEY}.water-magic-mock` : ACTIVE_RUN_STORAGE_KEY;
+  const [magic, setMagic] = useState<MagicPreview | null>(magicMock ? initialMagic : null);
+  const [magicFocusRequest, setMagicFocusRequest] = useState(0);
+  const viewportCenterRef = useRef({ lon: DEFAULT_LON, lat: DEFAULT_LAT });
+  const placeMagic = (id: string) => {
+    const settings = spellSettings(id, viewportCenterRef.current.lon, viewportCenterRef.current.lat);
+    setMagic(settings);
+    setHalfSize(String(recommendedMagicHalfSize(settings) ?? 4000));
+    setMagicFocusRequest(previous => previous + 1);
+  };
   const [lat, setLat] = useState(String(DEFAULT_LAT));
   const [lon, setLon] = useState(String(DEFAULT_LON));
-  const [halfSize, setHalfSize] = useState("250");
+  const [halfSize, setHalfSize] = useState(magicMock ? "100" : "250");
   const [intensity, setIntensity] = useState("150");
   const [duration, setDuration] = useState("20");
   const [minimumBlockSizeChoice, setMinimumBlockSizeChoice] = useState<"auto" | "1" | "2" | "4">("auto");
@@ -130,16 +148,27 @@ export default function SmokeApp() {
       parsedLat > 90 ||
       parsedLon < -180 ||
       parsedLon > 180 ||
-      ![250, 500, 1000, 2000, 4000].includes(halfValue)
+      ![...(magicMock ? [100] : []), 250, 500, 1000, 2000, 4000].includes(halfValue)
     ) {
       return null;
     }
     return squareArea(parsedLat, parsedLon, halfValue);
-  }, [lat, lon, halfSize]);
+  }, [lat, lon, halfSize, magicMock]);
   const suggestedMinimumBlockSize = recommendedMinimumBlockSize(parseNumber(halfSize) ?? 500);
+  const requiredMagicHalfSize = magic ? minimumMagicHalfSize(magic) : 0;
+  const magicAreaValid = !magicMock || (Number(halfSize) >= requiredMagicHalfSize && Number(halfSize) <= 250);
+  useEffect(() => {
+    if (!magicMock || !magic) return;
+    const recommended = recommendedMagicHalfSize(magic);
+    if (recommended !== null && Number(halfSize) < recommended) setHalfSize(String(recommended));
+  }, [magicMock, magic?.footprintKind, magic?.radius, magic?.length, magic?.width, halfSize]);
+  useEffect(() => {
+    if (!magicMock || !area) return;
+    setMagic((previous) => previous ? { ...previous, lat: area.center.lat_deg, lon: area.center.lon_deg } : null);
+  }, [magicMock, area]);
   const gridCellSizeM = Number(
-    minimumBlockSizeChoice === "auto" ? suggestedMinimumBlockSize : minimumBlockSizeChoice,
-  ) as 1 | 2 | 4;
+    magicMock ? 0.5 : minimumBlockSizeChoice === "auto" ? suggestedMinimumBlockSize : minimumBlockSizeChoice,
+  ) as 0.5 | 1 | 2 | 4;
   const gridCellCount = area
     ? Math.round(area.area_m2 / (gridCellSizeM * gridCellSizeM))
     : null;
@@ -164,19 +193,19 @@ export default function SmokeApp() {
   }, []);
 
   useEffect(() => {
-    const savedRunId = window.localStorage.getItem(ACTIVE_RUN_STORAGE_KEY);
+    const savedRunId = window.localStorage.getItem(activeRunStorageKey);
     if (savedRunId && RUN_ID_PATTERN.test(savedRunId)) {
       setRunId(savedRunId);
     }
-  }, []);
+  }, [activeRunStorageKey]);
 
   useEffect(() => {
     if (runId) {
-      window.localStorage.setItem(ACTIVE_RUN_STORAGE_KEY, runId);
+      window.localStorage.setItem(activeRunStorageKey, runId);
     } else {
-      window.localStorage.removeItem(ACTIVE_RUN_STORAGE_KEY);
+      window.localStorage.removeItem(activeRunStorageKey);
     }
-  }, [runId]);
+  }, [runId, activeRunStorageKey]);
 
   useEffect(() => {
     getAppConfig().then(setAppConfig).catch((cause: unknown) => {
@@ -234,13 +263,38 @@ export default function SmokeApp() {
     if (setupLocked) return;
     setLat(nextLat.toFixed(6));
     setLon(nextLon.toFixed(6));
+    viewportCenterRef.current = { lon: nextLon, lat: nextLat };
+    if (magicMock) setMagic((previous) => previous ? { ...previous, lon: nextLon, lat: nextLat } : null);
   };
+
+  useEffect(() => {
+    if (!magicMock || !resultMetadata) return;
+    const saved = savedMagic(resultMetadata);
+    if (!saved) return;
+    setMagic({ ...initialMagic, spellId: saved.spell_id, lat: saved.position.lat_deg, lon: saved.position.lon_deg,
+      length: String(saved.length_m ?? 20), width: String(saved.width_m ?? 10), sectorAngle: String(saved.sector_angle_deg ?? 90),
+      footprintKind: saved.footprint_kind, volume: String(saved.generation_rate_m3ps ?? saved.volume_m3 / saved.casting_seconds), radius: String(saved.radius_m),
+      releaseMode: "initial", initialMotion: saved.initial_motion ?? "none",
+      initialSpeed: String(saved.initial_speed_mps ?? 0), vortexDirection: saved.vortex_direction ?? "clockwise",
+      vortexCoreRadius: String(saved.vortex_core_radius_m ?? 2),
+      casting: String(saved.casting_seconds), relaxation: String(saved.relaxation_seconds), bearing: String(saved.bearing_deg) });
+    setLat(String(saved.position.lat_deg));
+    setLon(String(saved.position.lon_deg));
+    try {
+      const savedArea = JSON.parse(String(resultMetadata.run_summary.rainfall_source?.analysis_area_json));
+      if ([100, 250, 500, 1000, 2000, 4000].includes(savedArea.width_m / 2)) setHalfSize(String(savedArea.width_m / 2));
+    } catch { /* Legacy archives may omit the saved domain. */ }
+  }, [magicMock, resultMetadata]);
 
   const handleRun = async () => {
     if (!area) return;
+    if (magicMock && (!magic || !validMagic(magic) || !magicAreaValid)) {
+      setError("魔法を選択し、有効な水量と時間を入力してください。");
+      return;
+    }
     const intensityValue = parseNumber(intensity);
     const durationValue = parseNumber(duration);
-    if (
+    if (!magicMock && (
       intensityValue === null ||
       durationValue === null ||
       intensityValue <= 0 ||
@@ -248,7 +302,7 @@ export default function SmokeApp() {
       !Number.isInteger(durationValue) ||
       durationValue < 1 ||
       durationValue > 10080
-    ) {
+    )) {
       setError("雨量強度または継続時間が不正です。");
       return;
     }
@@ -264,14 +318,25 @@ export default function SmokeApp() {
     try {
       const created = await createRun({
         analysis_area: area,
-        requested_accuracy_mode: "uniform",
-        grid_cell_size_m: gridCellSizeM,
-        adaptive_max_block_size_m: gridCellSizeM,
-        rainfall: {
+        requested_accuracy_mode: magicMock ? "full_1m" : "uniform",
+        grid_cell_size_m: magicMock ? 0.5 : gridCellSizeM,
+        adaptive_max_block_size_m: gridCellSizeM === 0.5 ? 1 : gridCellSizeM,
+        ...(magicMock && magic ? { water_magic: {
+          schema_version: "1", spell_id: magic.spellId as NonNullable<RunConfig["water_magic"]>["spell_id"], catalog_revision: "2026-10-03",
+          footprint_kind: magic.footprintKind,
+          position: { lon_deg: magic.lon, lat_deg: magic.lat },
+          radius_m: Number(magic.radius), bearing_deg: Number(magic.bearing),
+          length_m: Number(magic.length), width_m: Number(magic.width), sector_angle_deg: Number(magic.sectorAngle),
+          volume_m3: Number(magic.volume) * Number(magic.casting), generation_rate_m3ps: Number(magic.volume), casting_seconds: Number(magic.casting),
+          relaxation_seconds: Number(magic.relaxation),
+          release_mode: "initial", initial_motion: magic.initialMotion,
+          initial_speed_mps: Number(magic.initialSpeed), vortex_direction: magic.vortexDirection,
+          vortex_core_radius_m: Number(magic.vortexCoreRadius),
+        } } : { rainfall: {
           kind: "constant",
-          intensity_mm_per_h: intensityValue,
-          duration_minutes: durationValue,
-        },
+          intensity_mm_per_h: intensityValue ?? 0,
+          duration_minutes: durationValue ?? 0,
+        } }),
       });
       setRunId(created.run_id);
     } catch (cause: unknown) {
@@ -286,7 +351,7 @@ export default function SmokeApp() {
     setElevationLoading(true);
     setError(null);
     try {
-      setElevationPreview(await createElevationPreview(area, gridCellSizeM));
+      setElevationPreview(await createElevationPreview(area, gridCellSizeM === 0.5 ? 1 : gridCellSizeM));
     } catch (cause: unknown) {
       setError(String(cause));
     } finally {
@@ -317,6 +382,10 @@ export default function SmokeApp() {
   };
 
   const handleNewAnalysis = () => {
+    if (magicMock) {
+      setHalfSize("100");
+      setMagic(previous => previous ? {...previous, releaseMode:"initial"} : initialMagic);
+    }
     setRunId(null);
     setStatus(null);
     setStageObservedAtMs(null);
@@ -386,11 +455,12 @@ export default function SmokeApp() {
     : false;
 
   return (
-    <main className="smoke-shell">
+    <main className={`smoke-shell${magicMock ? " magic-mock-mode" : ""}`}>
       <header>
         <div>
           <h1>Urban Pluvial Flood Simulator</h1>
-          <p className="smoke-kicker">ローカルレビュー版</p>
+          <p className="smoke-kicker">{magicMock ? "水魔法 · 0.5 m解析（1 mを2×2分割）" : "ローカルレビュー版"}</p>
+          <a href={magicMock ? "/?mode=rain" : "/?mode=water-magic"}>{magicMock ? "既存の降雨UIへ" : "水魔法を開く"}</a>
         </div>
         <div className="smoke-health">Backend: {backend}</div>
       </header>
@@ -399,8 +469,8 @@ export default function SmokeApp() {
         <section className="smoke-grid">
           <div className="smoke-card">
             {importing && <p>解析済み結果を読み込んでいます…</p>}
-            <section className="rainfall-ranking" aria-label="サンプルまたは読込み">
-              <h2>サンプルまたは読込み</h2>
+            <section className="rainfall-ranking" aria-label={magicMock ? "解析済み結果の読込み" : "サンプルまたは読込み"}>
+              <h2>{magicMock ? "解析済み結果の読込み" : "サンプルまたは読込み"}</h2>
               {appConfig.allow_result_import && (
                 <>
                   <button type="button" className="result-import-button" disabled={setupLocked || importing} onClick={() => importInputRef.current?.click()}>
@@ -417,7 +487,7 @@ export default function SmokeApp() {
                   />
                 </>
               )}
-              <ol>
+              {!magicMock && <ol>
                 {STATIC_RAINFALL_RANKING.map((event) => (
                   <li key={event.eventId}>
                     <button
@@ -431,7 +501,7 @@ export default function SmokeApp() {
                     </button>
                   </li>
                 ))}
-              </ol>
+              </ol>}
               <hr />
             </section>
             <h2>1. 条件</h2>
@@ -440,17 +510,24 @@ export default function SmokeApp() {
               <span>または緯度経度を直接入力</span>
             </div>
             <div className="compact-input-grid">
-              <label>緯度<input value={lat} disabled={setupLocked} onChange={(event) => setLat(event.target.value)} /></label>
-              <label>経度<input value={lon} disabled={setupLocked} onChange={(event) => setLon(event.target.value)} /></label>
-              <label>範囲<select value={halfSize} disabled={setupLocked} onChange={(event) => { setHalfSize(event.target.value); setMinimumBlockSizeChoice("auto"); }}><option value="250">±250 m</option><option value="500">±500 m</option><option value="1000">±1000 m</option><option value="2000">±2000 m</option><option value="4000">±4000 m</option></select></label>
-              <label>最小ブロック<select value={minimumBlockSizeChoice} disabled={setupLocked} onChange={(event) => setMinimumBlockSizeChoice(event.target.value as "auto" | "1" | "2" | "4")}><option value="auto">自動 ({suggestedMinimumBlockSize} m)</option><option value="1">1 m</option><option value="2">2 m</option><option value="4">4 m</option></select></label>
-              <label>雨量強度 (mm/h)<input value={intensity} disabled={setupLocked} onChange={(event) => setIntensity(event.target.value)} /></label>
-              <label>継続時間 (min)<input value={duration} disabled={setupLocked} onChange={(event) => setDuration(event.target.value)} /></label>
+              <label>緯度{magicMock ? <ClippedNumberInput type="text" value={lat} min={-90} max={90} disabled={setupLocked} onChange={setLat} /> : <input value={lat} disabled={setupLocked} onChange={(event) => setLat(event.target.value)} />}</label>
+              <label>経度{magicMock ? <ClippedNumberInput type="text" value={lon} min={-180} max={180} disabled={setupLocked} onChange={setLon} /> : <input value={lon} disabled={setupLocked} onChange={(event) => setLon(event.target.value)} />}</label>
+              <label>範囲<select value={halfSize} disabled={setupLocked} onChange={(event) => { setHalfSize(event.target.value); setMinimumBlockSizeChoice("auto"); }}>{magicMock && <option value="100">±100 m</option>}<option value="250">±250 m</option><option value="500" disabled={magicMock}>±500 m</option><option value="1000" disabled={magicMock}>±1000 m</option><option value="2000" disabled={magicMock}>±2000 m</option><option value="4000" disabled={magicMock}>±4000 m</option></select></label>
+              <label>最小ブロック<select value={magicMock ? "0.5" : minimumBlockSizeChoice} disabled={setupLocked || magicMock} onChange={(event) => setMinimumBlockSizeChoice(event.target.value as "auto" | "1" | "2" | "4")}>{magicMock && <option value="0.5">0.5 m（2×2分割）</option>}<option value="auto">自動 ({suggestedMinimumBlockSize} m)</option><option value="1">1 m</option><option value="2">2 m</option><option value="4">4 m</option></select></label>
+              {!magicMock && <><label>雨量強度 (mm/h)<input value={intensity} disabled={setupLocked} onChange={(event) => setIntensity(event.target.value)} /></label>
+              <label>継続時間 (min)<input value={duration} disabled={setupLocked} onChange={(event) => setDuration(event.target.value)} /></label></>}
             </div>
+            {magicMock && <><div className="parameter-help-list">
+              <span>緯度・経度 <ParameterHelp name="緯度・経度">解析中心と魔法の配置点です。住所検索または十進度の直接入力で変更します。緯度は−90〜90°、経度は−180〜180°です。</ParameterHelp></span>
+              <span>解析範囲 <ParameterHelp name="解析範囲">効果範囲の長さ・幅（円と扇形は半径）の最大値を1.5倍し、それ以上の±範囲を選びます。80 mなら120 mが必要なので±250 mです。0.5 m解析は100万格子までのため、±250 mを超える設定では解析できません。</ParameterHelp></span>
+              <span>最小ブロック <ParameterHelp name="最小ブロック">魔法解析は1 m格子を縦横2分割した0.5 m格子で計算します。ベクトルや粒子の表示密度はズームに合わせて調整します。</ParameterHelp></span>
+              </div>
+              {!magicAreaValid && <p role="alert" className="smoke-error">効果範囲には±{requiredMagicHalfSize.toFixed(1)} m以上が必要です。0.5 m解析の上限は±250 mです。効果範囲を小さくしてください。</p>}
+              <MagicMockPanel magic={magic} analysisArea={area} disabled={setupLocked} onSelect={placeMagic} onChange={setMagic} /></>}
             <div className="smoke-actions">
               {appConfig.allow_run ? (
                 <>
-                  <button className="analysis-start-button" disabled={!area || setupLocked} onClick={() => void handleRun()}>
+                  <button className="analysis-start-button" disabled={!area || setupLocked || (magicMock && (!magic || !validMagic(magic) || !magicAreaValid))} onClick={() => void handleRun()}>
                     解析開始
                   </button>
                   <button className="elevation-preview-button" disabled={!area || setupLocked} onClick={() => void handleElevationPreview()}>
@@ -506,11 +583,15 @@ export default function SmokeApp() {
                 area={area}
                 disabled={setupLocked}
                 onSelect={updateLocation}
+                magicPreview={magicMock ? magic : null}
+                magicFocusRequest={magicMock ? magicFocusRequest : undefined}
+                onMagicBearingChange={magicMock ? (bearing) => setMagic((previous) => previous ? { ...previous, bearing } : null) : undefined}
+                onViewportChange={magicMock ? (lon, lat) => { viewportCenterRef.current = { lon, lat }; } : undefined}
               />
             </div>
 
             <div className="smoke-card">
-              <h2>2. 実行状態</h2>
+              <h2>{magicMock ? "3. 実行状態" : "2. 実行状態"}</h2>
               {area ? (
                 <>
                   <dl>
@@ -572,7 +653,7 @@ export default function SmokeApp() {
       )}
 
       <footer>
-        レビュー対象: 地図による場所・範囲指定 / 工程・取得データ表示 / SFINCS稼働表示 / 最大浸水深地図・地点確認 / 下水・浸透は未考慮 / 雨は解析範囲内で一様 / 公的な洪水予報・避難情報ではありません
+        {magicMock ? "水魔法 / イメージアニメと解析結果は別 / 水の流れを秒単位で解析 / 水量は演出からの推定値" : "レビュー対象: 地図による場所・範囲指定 / 工程・取得データ表示 / SFINCS稼働表示 / 最大浸水深地図・地点確認 / 下水・浸透は未考慮 / 雨は解析範囲内で一様 / 公的な洪水予報・避難情報ではありません"}
       </footer>
     </main>
   );

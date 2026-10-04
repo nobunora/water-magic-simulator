@@ -44,12 +44,15 @@ async def api_contract_error_handler(_: Request, exc: ApiContractError) -> JSONR
 async def request_validation_error_handler(request: Request, exc: RequestValidationError):
     if not request.url.path.startswith("/api/v1"):
         return await request_validation_exception_handler(request, exc)
+    message = "入力値を確認してください。"
+    if isinstance(exc.body, dict) and exc.body.get("water_magic") is not None:
+        message = "; ".join(error["msg"].removeprefix("Value error, ") for error in exc.errors())
     return JSONResponse(
         status_code=400,
         content={
             "error": {
                 "code": "INPUT_VALIDATION_ERROR",
-                "message": "入力値を確認してください。",
+                "message": message,
                 "stage": None,
                 "retryable": False,
             }

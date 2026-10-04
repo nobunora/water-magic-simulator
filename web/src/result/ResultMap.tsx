@@ -1,10 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Map as MapLibreMap,
   Marker,
   NavigationControl,
   setWorkerUrl,
-  type GeoJSONSource,
   type ImageSource,
   type MapMouseEvent,
   type StyleSpecification,
@@ -18,6 +17,9 @@ import type {
   ResultMetadataResponse,
 } from "../api/client";
 import { resultBounds, resultImageCoordinates } from "./resultGeometry";
+import MagicResultFootprint, { type MagicGeometry } from "./MagicResultFootprint";
+import { projectNativeFlowField } from "./nativeFlowField";
+import { createParticleRenderer } from "./particleRenderer";
 
 setWorkerUrl(maplibreWorkerUrl);
 
@@ -25,15 +27,19 @@ export type FlowRenderStats = {
   sourceFeatureCount: number;
   renderedFeatureCount: number;
   svgArrowCount: number;
+  canvasArrowCount?: number;
   layerOrder: string[];
   featureBounds: [number, number, number, number] | null;
   mapBounds: [number, number, number, number];
 };
 
 type Props = {
+  magicGeometry?: MagicGeometry | null;
   metadata: Pick<ResultMetadataResponse, "bounds">;
   imageUrl: string;
   flowVectorData: FlowVectorFeatureCollection | null;
+  nextFlowVectorData?: FlowVectorFeatureCollection | null;
+  flowInterpolation?: { current: number };
   flowSpeedRange?: readonly [number, number];
   flowSpeedBreaks?: readonly number[];
   flowDisplayMode?: "vectors" | "particles" | null;
@@ -43,7 +49,7 @@ type Props = {
   onInspect?: (lon: number, lat: number) => void;
   onFlowRenderStats?: (stats: FlowRenderStats | null) => void;
   onViewportChange?: (viewport: FlowViewport, zoom: number) => void;
-  onCaptureReady?: (capture: (() => Promise<HTMLCanvasElement>) | null) => void;
+  onCaptureReady?: (capture: ((expectedImageUrl?: string) => Promise<HTMLCanvasElement>) | null) => void;
 };
 
 const EMPTY_FLOW = {
@@ -111,12 +117,6 @@ export function particleSpeedPxPerSecond(speedMps: number): number {
   );
 }
 
-function colorWithAlpha(hex: string, alpha: number): string {
-  const red = Number.parseInt(hex.slice(1, 3), 16);
-  const green = Number.parseInt(hex.slice(3, 5), 16);
-  const blue = Number.parseInt(hex.slice(5, 7), 16);
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
-}
 
 function particlePhase(row: number, column: number): number {
   // Stable pseudo-random phase keeps one-second lifetimes continuous while
@@ -138,7 +138,10 @@ function estimateVectorSpacing(nodes: ProjectedFlowNode[]): number {
   if (nodes.length < 2) return 24;
   const nearestDistances = nodes.map((node, index) => {
     let nearest = Number.POSITIVE_INFINITY;
-    nodes.forEach((candidate, candidateIndex) => {
+    // Adjacent rows/columns in the sampled grid occur near one another in
+    // the ordered list. Bound preparation work independently of node count.
+    nodes.slice(Math.max(0, index - 8), index + 9).forEach((candidate, offset) => {
+      const candidateIndex = Math.max(0, index - 8) + offset;
       if (candidateIndex === index) return;
       nearest = Math.min(nearest, Math.hypot(candidate.x - node.x, candidate.y - node.y));
     });
@@ -151,10 +154,11 @@ function bucketKey(x: number, y: number, cellSizePx: number): string {
   return `${Math.floor(x / cellSizePx)}:${Math.floor(y / cellSizePx)}`;
 }
 
-function createProjectedFlowField(nodes: ProjectedFlowNode[]): ProjectedFlowField {
-  const spacingPx = estimateVectorSpacing(nodes);
+function createProjectedFlowField(nodes: ProjectedFlowNode[], nativeSpacingPx?: number): ProjectedFlowField {
+  const spacingPx = nativeSpacingPx === undefined ? estimateVectorSpacing(nodes) : Math.max(8, nativeSpacingPx);
   const cellSizePx = Math.max(8, spacingPx * 1.5);
   const buckets = new Map<string, number[]>();
+  if (nativeSpacingPx !== undefined) return { nodes, buckets, spacingPx, cellSizePx };
   nodes.forEach((node, index) => {
     const key = bucketKey(node.x, node.y, cellSizePx);
     const bucket = buckets.get(key) ?? [];
@@ -181,12 +185,15 @@ function sampleProjectedFlow(
       indices.forEach((index) => {
         const node = field.nodes[index];
         const distance = Math.hypot(node.x - x, node.y - y);
-        if (distance <= maximumDistance) candidates.push({ node, distance });
+        if (distance <= maximumDistance) {
+          candidates.push({ node, distance });
+          candidates.sort((left, right) => left.distance - right.distance);
+          if (candidates.length > PARTICLE_MAX_NEIGHBORS) candidates.pop();
+        }
       });
     }
   }
   if (candidates.length === 0) return null;
-  candidates.sort((left, right) => left.distance - right.distance);
 
   let weightedDx = 0;
   let weightedDy = 0;
@@ -228,33 +235,6 @@ function appendTrailPoint(particle: FlowParticle, point: ScreenPoint): void {
   }
 }
 
-function drawFadingTrail(
-  context: CanvasRenderingContext2D,
-  trail: ScreenPoint[],
-  particleColor: string,
-): void {
-  if (trail.length < 2) return;
-  const tail = trail[0];
-  const head = trail[trail.length - 1];
-  context.beginPath();
-  context.moveTo(tail.x, tail.y);
-  trail.slice(1).forEach((point) => context.lineTo(point.x, point.y));
-  context.lineCap = "round";
-
-  const haloGradient = context.createLinearGradient(tail.x, tail.y, head.x, head.y);
-  haloGradient.addColorStop(0, "rgba(255, 255, 255, 0)");
-  haloGradient.addColorStop(1, "rgba(255, 255, 255, 0.9)");
-  context.strokeStyle = haloGradient;
-  context.lineWidth = 5.5;
-  context.stroke();
-
-  const trailGradient = context.createLinearGradient(tail.x, tail.y, head.x, head.y);
-  trailGradient.addColorStop(0, colorWithAlpha(particleColor, 0));
-  trailGradient.addColorStop(1, particleColor);
-  context.strokeStyle = trailGradient;
-  context.lineWidth = 2.5;
-  context.stroke();
-}
 
 function overlayStyle(
   metadata: Pick<ResultMetadataResponse, "bounds">,
@@ -391,9 +371,12 @@ function overlayStyle(
 }
 
 export default function ResultMap({
+  magicGeometry = null,
   metadata,
   imageUrl,
   flowVectorData,
+  nextFlowVectorData,
+  flowInterpolation,
   flowSpeedRange = [0.001, 1] as const,
   flowSpeedBreaks,
   flowDisplayMode = flowVectorData ? "vectors" : null,
@@ -409,12 +392,17 @@ export default function ResultMap({
   const overlayContainerRef = useRef<HTMLDivElement | null>(null);
   const baseMapRef = useRef<MapLibreMap | null>(null);
   const overlayMapRef = useRef<MapLibreMap | null>(null);
+  const [footprintMap, setFootprintMap] = useState<MapLibreMap | null>(null);
   const markerRef = useRef<Marker | null>(null);
   const flowSvgRef = useRef<SVGSVGElement | null>(null);
   const flowCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const vectorCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const particleRendererRef = useRef<ReturnType<typeof createParticleRenderer>>(null);
+  useEffect(() => () => { particleRendererRef.current?.dispose(); }, []);
   const inspectRef = useRef(onInspect);
   const viewportRef = useRef(onViewportChange);
   const initialImageUrlRef = useRef(imageUrl);
+  const appliedImageUrlRef = useRef(imageUrl);
 
   useEffect(() => {
     const map = overlayMapRef.current;
@@ -470,17 +458,38 @@ export default function ResultMap({
       fitBoundsOptions: { padding: 32, maxZoom: 18 },
       maxZoom: RESULT_MAX_ZOOM,
       attributionControl: false,
+      canvasContextAttributes: { preserveDrawingBuffer: true },
     });
     overlayMapRef.current = overlayMap;
-    onCaptureReady?.(async () => {
+    setFootprintMap(overlayMap);
+    onCaptureReady?.(async (expectedImageUrl) => {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          overlayMap.off("render", rendered);
+          reject(new Error("結果画像の描画が完了しませんでした。"));
+        }, 15000);
+        const rendered = () => {
+          if (expectedImageUrl && appliedImageUrlRef.current !== expectedImageUrl) return;
+          if (!overlayMap.getSource("result-overlay") || !overlayMap.isSourceLoaded("result-overlay")) return;
+          overlayMap.off("render", rendered);
+          window.clearTimeout(timeout);
+          resolve();
+        };
+        overlayMap.on("render", rendered);
+        overlayMap.triggerRepaint();
+      });
       const source = overlayMap.getCanvas();
       const output = document.createElement("canvas");
       output.width = source.width;
       output.height = source.height;
       const context = output.getContext("2d");
       if (!context) throw new Error("Canvas 2D context is unavailable");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, output.width, output.height);
       context.drawImage(source, 0, 0);
       const particles = flowCanvasRef.current;
+      const vectors = vectorCanvasRef.current;
+      if (vectors) context.drawImage(vectors, 0, 0, output.width, output.height);
       if (particles) context.drawImage(particles, 0, 0, output.width, output.height);
       const svg = flowSvgRef.current;
       if (svg && svg.childElementCount > 0) {
@@ -560,6 +569,7 @@ export default function ResultMap({
 
     const update = () => {
       const source = map.getSource("result-overlay") as ImageSource | undefined;
+      appliedImageUrlRef.current = imageUrl;
       source?.updateImage({
         url: imageUrl,
         coordinates: resultImageCoordinates(metadata.bounds),
@@ -586,89 +596,66 @@ export default function ResultMap({
 
     const featureBounds = (): [number, number, number, number] | null => {
       if (!flowVectorData || flowVectorData.features.length === 0) return null;
-      const points = flowVectorData.features.flatMap((feature) =>
-        feature.geometry.coordinates.flatMap((line) => line),
-      );
-      if (points.length === 0) return null;
-      const lons = points.map((point) => point[0]);
-      const lats = points.map((point) => point[1]);
-      return [
-        Math.min(...lons),
-        Math.min(...lats),
-        Math.max(...lons),
-        Math.max(...lats),
-      ];
+      const bounds: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
+      for (const feature of flowVectorData.features) {
+        for (const line of feature.geometry.coordinates) {
+          for (const [lon, lat] of line) {
+            bounds[0] = Math.min(bounds[0], lon); bounds[1] = Math.min(bounds[1], lat);
+            bounds[2] = Math.max(bounds[2], lon); bounds[3] = Math.max(bounds[3], lat);
+          }
+        }
+      }
+      return Number.isFinite(bounds[0]) ? bounds : null;
     };
 
-    const renderSvg = (displayFlow: FlowVectorFeatureCollection | null) => {
-      svg.replaceChildren();
-      const width = Math.max(1, svg.clientWidth);
-      const height = Math.max(1, svg.clientHeight);
-      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-
-      if (!displayFlow || displayFlow.features.length === 0) {
-        svg.dataset.flowSvgArrows = "0";
-        return;
+    const nextById = new Map(nextFlowVectorData?.features.map((feature) =>
+      [`${feature.properties.row}:${feature.properties.column}`, feature]) ?? []);
+    const canvas = vectorCanvasRef.current;
+    const context = canvas?.getContext("2d");
+    const renderVectors = (displayFlow: FlowVectorFeatureCollection | null) => {
+      if (!canvas || !context) return;
+      const ratio = window.devicePixelRatio || 1;
+      const width = Math.max(1, canvas.clientWidth), height = Math.max(1, canvas.clientHeight);
+      if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+        canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio);
       }
-
-      const namespace = "http://www.w3.org/2000/svg";
-      for (const feature of displayFlow.features) {
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      context.clearRect(0, 0, width, height);
+      const paths = new Map<string, Path2D>();
+      let count = 0;
+      const fraction = flowInterpolation?.current ?? 0;
+      for (const feature of displayFlow?.features ?? []) {
         const shaft = feature.geometry.coordinates[0];
         if (!shaft || shaft.length < 2) continue;
-        const projectedTail = map.project([shaft[0][0], shaft[0][1]]);
-        const projectedTip = map.project([
-          shaft[shaft.length - 1][0],
-          shaft[shaft.length - 1][1],
-        ]);
-        let dx = projectedTip.x - projectedTail.x;
-        let dy = projectedTip.y - projectedTail.y;
-        const rawLength = Math.hypot(dx, dy);
-        if (rawLength <= 1e-6) continue;
-        dx /= rawLength;
-        dy /= rawLength;
-
-        // Keep the accepted screen-space vector rendering from d749d5:
-        // geometry supplies direction while the visible shaft stays stable.
-        const shaftLength = FLOW_ARROW_LENGTH_PX;
-        const tailX = projectedTail.x;
-        const tailY = projectedTail.y;
-        const tipX = tailX + dx * shaftLength;
-        const tipY = tailY + dy * shaftLength;
-        const headLength = shaftLength * 0.28;
-        const headWidth = headLength * 0.58;
-        const baseX = tipX - dx * headLength;
-        const baseY = tipY - dy * headLength;
-        const leftX = baseX - dy * headWidth;
-        const leftY = baseY + dx * headWidth;
-        const rightX = baseX + dy * headWidth;
-        const rightY = baseY - dx * headWidth;
-        const d = [
-          `M ${tailX.toFixed(2)} ${tailY.toFixed(2)} L ${tipX.toFixed(2)} ${tipY.toFixed(2)}`,
-          `M ${tipX.toFixed(2)} ${tipY.toFixed(2)} L ${leftX.toFixed(2)} ${leftY.toFixed(2)}`,
-          `M ${tipX.toFixed(2)} ${tipY.toFixed(2)} L ${rightX.toFixed(2)} ${rightY.toFixed(2)}`,
-        ].join(" ");
-
-        const halo = document.createElementNS(namespace, "path");
-        halo.setAttribute("d", d);
-        halo.setAttribute("fill", "none");
-        halo.setAttribute("stroke", "#FFFFFF");
-        halo.setAttribute("stroke-width", "7");
-        halo.setAttribute("stroke-linecap", "round");
-        halo.setAttribute("stroke-linejoin", "round");
-        halo.setAttribute("stroke-opacity", "0.96");
-        svg.appendChild(halo);
-
-        const line = document.createElementNS(namespace, "path");
-        line.setAttribute("d", d);
-        line.setAttribute("fill", "none");
-        line.setAttribute("stroke", flowColor(feature.properties.speed_mps, flowSpeedRange, flowSpeedBreaks));
-        line.setAttribute("stroke-width", "4");
-        line.setAttribute("stroke-linecap", "round");
-        line.setAttribute("stroke-linejoin", "round");
-        line.setAttribute("stroke-opacity", "1");
-        svg.appendChild(line);
+        const next = nextById.get(`${feature.properties.row}:${feature.properties.column}`);
+        const nextShaft = next?.geometry.coordinates[0];
+        const project = (index: number) => {
+          const point = shaft[index], other = nextShaft?.[index] ?? point;
+          return map.project([point[0] + (other[0] - point[0]) * fraction,
+            point[1] + (other[1] - point[1]) * fraction]);
+        };
+        const tail = project(0), tip = project(shaft.length - 1);
+        const length = Math.hypot(tip.x - tail.x, tip.y - tail.y);
+        if (length <= 1e-6) continue;
+        const dx = (tip.x - tail.x) / length, dy = (tip.y - tail.y) / length;
+        const tipX = tail.x + dx * FLOW_ARROW_LENGTH_PX, tipY = tail.y + dy * FLOW_ARROW_LENGTH_PX;
+        const head = FLOW_ARROW_LENGTH_PX * 0.28, spread = head * 0.58;
+        const speed = feature.properties.speed_mps + ((next?.properties.speed_mps ?? feature.properties.speed_mps) - feature.properties.speed_mps) * fraction;
+        const color = flowColor(speed, flowSpeedRange, flowSpeedBreaks);
+        const path = paths.get(color) ?? new Path2D();
+        path.moveTo(tail.x, tail.y); path.lineTo(tipX, tipY);
+        path.moveTo(tipX, tipY); path.lineTo(tipX - dx * head - dy * spread, tipY - dy * head + dx * spread);
+        path.moveTo(tipX, tipY); path.lineTo(tipX - dx * head + dy * spread, tipY - dy * head - dx * spread);
+        paths.set(color, path);
+        count++;
       }
-      svg.dataset.flowSvgArrows = String(displayFlow.features.length);
+      context.lineCap = "round"; context.lineJoin = "round";
+      context.lineWidth = 7; context.strokeStyle = "rgba(255,255,255,0.96)";
+      for (const path of paths.values()) context.stroke(path);
+      context.lineWidth = 4;
+      for (const [color, path] of paths) { context.strokeStyle = color; context.stroke(path); }
+      canvas.dataset.flowCanvasArrows = String(count);
+      svg.dataset.flowSvgArrows = "0";
     };
 
     const report = () => {
@@ -678,7 +665,8 @@ export default function ResultMap({
         renderedFeatureCount: map.queryRenderedFeatures({
           layers: [FLOW_LINE_LAYER_ID],
         }).length,
-        svgArrowCount: Number(svg.dataset.flowSvgArrows ?? "0"),
+        svgArrowCount: 0,
+        canvasArrowCount: Number(canvas?.dataset.flowCanvasArrows ?? "0"),
         layerOrder: (map.getStyle().layers ?? []).map((layer) => layer.id),
         featureBounds: featureBounds(),
         mapBounds: [
@@ -692,13 +680,9 @@ export default function ResultMap({
 
     const update = () => {
       const displayFlow = flowDisplayMode === "vectors" ? flowVectorData : null;
-      const source = map.getSource(FLOW_SOURCE_ID) as GeoJSONSource | undefined;
-      source?.setData(flowVectorData ?? EMPTY_FLOW);
-      const visibility = displayFlow && displayFlow.features.length > 0
-        ? "visible"
-        : "none";
-      map.setLayoutProperty(FLOW_HALO_LAYER_ID, "visibility", visibility);
-      map.setLayoutProperty(FLOW_LINE_LAYER_ID, "visibility", visibility);
+      const visibility = displayFlow && displayFlow.features.length > 0 ? "visible" : "none";
+      map.setLayoutProperty(FLOW_HALO_LAYER_ID, "visibility", "none");
+      map.setLayoutProperty(FLOW_LINE_LAYER_ID, "visibility", "none");
 
       // Keep an explicit deterministic stack after any source/image update.
       // Result raster < MapLibre vector layers < analysis boundary.
@@ -709,9 +693,8 @@ export default function ResultMap({
       map.setLayoutProperty("analysis-boundary-casing", "visibility", "visible");
       map.setLayoutProperty("analysis-boundary-outline", "visibility", "visible");
 
-      // Independent SVG rendering is the visible fallback/guarantee. It uses
-      // the same GeoJSON but bypasses MapLibre line-layer rendering entirely.
-      renderSvg(displayFlow);
+      // One batched Canvas pass; no SVG nodes or duplicate MapLibre geometry.
+      renderVectors(displayFlow);
 
       if (visibility === "none") {
         onFlowRenderStats?.(null);
@@ -722,6 +705,14 @@ export default function ResultMap({
       map.triggerRepaint();
     };
 
+    let vectorFrame = 0, lastVectorFrame = 0;
+    const animateVectors = (now: number) => {
+      if (now - lastVectorFrame >= 100 && flowDisplayMode === "vectors") {
+        renderVectors(flowVectorData); lastVectorFrame = now;
+      }
+      vectorFrame = requestAnimationFrame(animateVectors);
+    };
+    if (nextFlowVectorData && flowInterpolation && flowDisplayMode === "vectors") vectorFrame = requestAnimationFrame(animateVectors);
     map.on("moveend", update);
     map.on("resize", update);
 
@@ -734,11 +725,12 @@ export default function ResultMap({
       map.off("load", update);
       map.off("moveend", update);
       map.off("resize", update);
+      cancelAnimationFrame(vectorFrame);
       if (idleReporter) map.off("idle", idleReporter);
       svg.replaceChildren();
       svg.dataset.flowSvgArrows = "0";
     };
-  }, [flowDisplayMode, flowVectorData, flowSpeedRange, flowSpeedBreaks, onFlowRenderStats]);
+  }, [flowDisplayMode, flowVectorData, nextFlowVectorData, flowInterpolation, flowSpeedRange, flowSpeedBreaks, onFlowRenderStats]);
 
   useEffect(() => {
     const map = overlayMapRef.current;
@@ -749,8 +741,11 @@ export default function ResultMap({
       return;
     }
 
-    const context = canvas.getContext("2d");
-    if (!context) return;
+    const gpu = particleRendererRef.current ?? createParticleRenderer(canvas);
+    particleRendererRef.current = gpu;
+    const context = gpu ? null : canvas.getContext("2d");
+    if (!context && !gpu) return;
+    canvas.dataset.flowRenderBackend = gpu ? "webgl" : "canvas";
     const buildField = () => createProjectedFlowField(flowVectorData.features.flatMap((feature) => {
       const shaft = feature.geometry.coordinates[0];
       if (!shaft || shaft.length < 2) return [];
@@ -759,16 +754,31 @@ export default function ResultMap({
       const length = Math.hypot(tip.x - tail.x, tip.y - tail.y);
       if (length <= 1e-6) return [];
       return [{
-        x: tail.x,
-        y: tail.y,
+        x: tail.x + (tip.x - tail.x) * 0.42,
+        y: tail.y + (tip.y - tail.y) * 0.42,
         dx: (tip.x - tail.x) / length,
         dy: (tip.y - tail.y) / length,
         speedMps: feature.properties.speed_mps,
         speedPxPerSecond: particleSpeedPxPerSecond(feature.properties.speed_mps),
       }];
-    }));
+    }), nativeField ? nativeField.spacingPx * flowVectorData.metadata.arrow_length_m / (0.8 * flowVectorData.flow_field!.cell_size_m) : undefined);
 
+    const project = (coordinate: number[]) => map.project([coordinate[0], coordinate[1]]);
+    let nativeField = flowVectorData.flow_field ? projectNativeFlowField(flowVectorData.flow_field, project) : null;
+    let nextNativeField = nextFlowVectorData?.flow_field ? projectNativeFlowField(nextFlowVectorData.flow_field, project) : null;
     let field = buildField();
+    const sample = (x: number, y: number) => {
+      if (!nativeField) return sampleProjectedFlow(field, x, y);
+      const current = nativeField.sample(x, y);
+      if (!current) return null;
+      const next = nextNativeField?.sample(x, y);
+      const fraction = flowInterpolation?.current ?? 0;
+      const flow = nativeField.vector(
+        current.uMps + ((next?.uMps ?? current.uMps) - current.uMps) * fraction,
+        current.vMps + ((next?.vMps ?? current.vMps) - current.vMps) * fraction,
+      );
+      return flow ? { ...flow, speedPxPerSecond: particleSpeedPxPerSecond(flow.speedMps) } : null;
+    };
     const resetParticle = (
       particle: FlowParticle,
       index: number,
@@ -786,6 +796,10 @@ export default function ResultMap({
       const offset = (phase - 0.5) * field.spacingPx;
       particle.x = seed.x + seed.dx * offset;
       particle.y = seed.y + seed.dy * offset;
+      if (nativeField && !nativeField.sample(particle.x, particle.y)) {
+        particle.x = seed.x;
+        particle.y = seed.y;
+      }
       particle.targetDistancePx = field.spacingPx * PARTICLE_MIN_VECTOR_CROSSINGS;
       particle.travelledPx = staggerInitialLifetime
         ? particle.targetDistancePx * (index % PARTICLE_PHASE_GROUPS) / PARTICLE_PHASE_GROUPS
@@ -811,6 +825,8 @@ export default function ResultMap({
     ));
     let particles: FlowParticle[] = createParticles();
     const rebuildField = () => {
+      nativeField = flowVectorData.flow_field ? projectNativeFlowField(flowVectorData.flow_field, project) : null;
+      nextNativeField = nextFlowVectorData?.flow_field ? projectNativeFlowField(nextFlowVectorData.flow_field, project) : null;
       field = buildField();
       particles = createParticles();
       canvas.dataset.flowParticleSpacingPx = field.spacingPx.toFixed(1);
@@ -837,6 +853,11 @@ export default function ResultMap({
 
     const render = (now: number) => {
       if (disposed) return;
+      if (previousFrameMs !== null && now - previousFrameMs < 1000 / 30) {
+        frame = window.requestAnimationFrame(render);
+        return;
+      }
+      const frameStarted = performance.now();
       const ratio = window.devicePixelRatio || 1;
       const width = Math.max(1, canvas.clientWidth);
       const height = Math.max(1, canvas.clientHeight);
@@ -846,19 +867,22 @@ export default function ResultMap({
         canvas.width = pixelWidth;
         canvas.height = pixelHeight;
       }
-      context.setTransform(ratio, 0, 0, ratio, 0, 0);
-      context.clearRect(0, 0, width, height);
+      context?.setTransform(ratio, 0, 0, ratio, 0, 0);
+      context?.clearRect(0, 0, width, height);
+      gpu?.begin(width, height, ratio);
       const elapsedSeconds = previousFrameMs === null
         ? 1 / 60
         : Math.min(0.05, Math.max(0, (now - previousFrameMs) / 1000));
       previousFrameMs = now;
 
       let rendered = 0;
+      const paths = new Map<string, { trails: Path2D[]; points: Path2D }>();
+      const halos = new Path2D();
       particles.forEach((particle, index) => {
-        let flow = sampleProjectedFlow(field, particle.x, particle.y);
+        let flow = sample(particle.x, particle.y);
         if (!flow) {
           resetParticle(particle, index);
-          flow = sampleProjectedFlow(field, particle.x, particle.y);
+          flow = sample(particle.x, particle.y);
         }
         if (!flow) return;
         const distance = flow.speedPxPerSecond * elapsedSeconds;
@@ -873,26 +897,51 @@ export default function ResultMap({
           || particle.y > height + 6;
         if (outsideViewport || particle.travelledPx >= particle.targetDistancePx) {
           resetParticle(particle, index);
-          flow = sampleProjectedFlow(field, particle.x, particle.y);
+          flow = sample(particle.x, particle.y);
           if (!flow) return;
         }
 
         const particleColor = flowColor(flow.speedMps, flowSpeedRange, flowSpeedBreaks);
-        drawFadingTrail(context, particle.trail, particleColor);
-
-        // The particle itself is a zero-length point; only its fading history
-        // forms a line behind it.
-        context.beginPath();
-        context.arc(particle.x, particle.y, 3.2, 0, Math.PI * 2);
-        context.fillStyle = "rgba(255, 255, 255, 0.92)";
-        context.fill();
-        context.beginPath();
-        context.arc(particle.x, particle.y, 1.8, 0, Math.PI * 2);
-        context.fillStyle = particleColor;
-        context.fill();
+        if (gpu) {
+          particle.trail.forEach((point, index) => gpu.point(point.x, point.y, particleColor,
+            (index + 1) / particle.trail.length, 5.5, 0.55));
+          gpu.point(particle.x, particle.y, particleColor, 1, 6.4, 0.56);
+          rendered++;
+          return;
+        }
+        const group = paths.get(particleColor) ?? { trails: [new Path2D(), new Path2D(), new Path2D()], points: new Path2D() };
+        let previousSegmentGroup = -1;
+        for (let segment = 1; segment < particle.trail.length; segment++) {
+          const segmentGroup = Math.min(2, Math.floor(segment * 3 / particle.trail.length));
+          const path = group.trails[segmentGroup];
+          if (segmentGroup !== previousSegmentGroup) path.moveTo(particle.trail[segment - 1].x, particle.trail[segment - 1].y);
+          path.lineTo(particle.trail[segment].x, particle.trail[segment].y);
+          previousSegmentGroup = segmentGroup;
+        }
+        halos.moveTo(particle.x + 3.2, particle.y);
+        halos.arc(particle.x, particle.y, 3.2, 0, Math.PI * 2);
+        group.points.moveTo(particle.x + 1.8, particle.y);
+        group.points.arc(particle.x, particle.y, 1.8, 0, Math.PI * 2);
+        paths.set(particleColor, group);
         rendered += 1;
       });
+      if (context) {
+        context.lineCap = "round";
+        for (let segment = 0; segment < 3; segment++) {
+          context.globalAlpha = [0.25, 0.55, 1][segment];
+          context.strokeStyle = "#FFFFFF"; context.lineWidth = 5.5;
+          for (const group of paths.values()) context.stroke(group.trails[segment]);
+          context.lineWidth = 2.5;
+          for (const [color, group] of paths) { context.strokeStyle = color; context.stroke(group.trails[segment]); }
+        }
+        context.globalAlpha = 0.92; context.fillStyle = "#FFFFFF"; context.fill(halos);
+        context.globalAlpha = 1;
+        for (const [color, group] of paths) { context.fillStyle = color; context.fill(group.points); }
+      }
+      gpu?.finish();
       canvas.dataset.flowParticles = String(rendered);
+      canvas.dataset.flowFieldCellSizeM = String(flowVectorData.flow_field?.cell_size_m ?? "legacy");
+      canvas.dataset.flowFrameMs = (performance.now() - frameStarted).toFixed(2);
       frame = window.requestAnimationFrame(render);
     };
 
@@ -902,10 +951,11 @@ export default function ResultMap({
       window.cancelAnimationFrame(frame);
       map.off("moveend", rebuildField);
       map.off("resize", rebuildField);
-      context.clearRect(0, 0, canvas.width, canvas.height);
+      context?.clearRect(0, 0, canvas.width, canvas.height);
+      gpu?.clear();
       canvas.dataset.flowParticles = "0";
     };
-  }, [flowDisplayMode, flowVectorData, flowSpeedRange, flowSpeedBreaks]);
+  }, [flowDisplayMode, flowVectorData, nextFlowVectorData, flowInterpolation, flowSpeedRange, flowSpeedBreaks]);
 
   return (
     <div className="result-map-stack" role="region" aria-label={mapLabel}>
@@ -926,11 +976,17 @@ export default function ResultMap({
         data-flow-svg-arrows="0"
       />
       <canvas
+        ref={vectorCanvasRef}
+        className="result-vector-canvas"
+        aria-hidden="true"
+      />
+      <canvas
         ref={flowCanvasRef}
         className="result-flow-canvas"
         aria-hidden="true"
         data-flow-particles="0"
       />
+      <MagicResultFootprint map={footprintMap} geometry={magicGeometry} />
     </div>
   );
 }

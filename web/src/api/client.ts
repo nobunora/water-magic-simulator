@@ -12,6 +12,35 @@ export type RunCreateResponse = components["schemas"]["RunCreateResponse"];
 export type RunStatusResponse = components["schemas"]["RunStatusResponse"];
 export type ResultMetadataResponse = components["schemas"]["ResultMetadataResponse"];
 export type PointInspectionResponse = components["schemas"]["PointInspectionResponse"];
+export type ResultExtremeLocation = components["schemas"]["ResultExtremeLocation"];
+export type ResultExtremaResponse = components["schemas"]["ResultExtremaResponse"];
+export type ResultExtremaJobResponse = components["schemas"]["ResultExtremaJobResponse"];
+export type ResultEnergyJobResponse = components["schemas"]["ResultEnergyJobResponse"];
+export type PointEnergyResponse = components["schemas"]["PointEnergyResponse"];
+
+export function getResultEnergyPoint(runId: string, lon: number, lat: number, signal?: AbortSignal): Promise<PointEnergyResponse> {
+  const query = new URLSearchParams({ lon: String(lon), lat: String(lat) });
+  return jsonRequest(`/api/v1/runs/${encodeURIComponent(runId)}/result-energy/point?${query}`, { signal });
+}
+
+export function startResultEnergy(runId: string, signal?: AbortSignal): Promise<ResultEnergyJobResponse> {
+  return jsonRequest(`/api/v1/runs/${encodeURIComponent(runId)}/result-energy`, { method: "POST", signal });
+}
+
+export function getResultEnergy(runId: string, signal?: AbortSignal): Promise<ResultEnergyJobResponse> {
+  return jsonRequest(`/api/v1/runs/${encodeURIComponent(runId)}/result-energy`, { signal });
+}
+
+export function getResultExtrema(runId: string, signal?: AbortSignal): Promise<ResultExtremaResponse> {
+  return jsonRequest<ResultExtremaResponse>(`/api/v1/runs/${encodeURIComponent(runId)}/result-extrema`, { signal });
+}
+export function startResultExtrema(runId: string, signal?: AbortSignal): Promise<ResultExtremaJobResponse> {
+  return jsonRequest(`/api/v1/runs/${encodeURIComponent(runId)}/result-extrema`, { method: "POST", signal });
+}
+
+export function getResultExtremaProgress(runId: string, signal?: AbortSignal): Promise<ResultExtremaJobResponse> {
+  return jsonRequest(`/api/v1/runs/${encodeURIComponent(runId)}/result-extrema/progress`, { signal });
+}
 export type ResultImportResponse = components["schemas"]["ResultImportResponse"];
 export type RecentRainfallRankingResponse = components["schemas"]["RecentRainfallRankingResponse"];
 
@@ -150,7 +179,8 @@ export function resultLayerUrl(
     }
     return `/api/v1/runs/${encodedRunId}/layers/${layer}.png?time_index=${timeIndex}&display_revision=adaptive-area-v1`;
   }
-  return `/api/v1/runs/${encodedRunId}/layers/${layer}.png?display_revision=adaptive-area-v1`;
+  const revision = layer === "grid-resolution" ? "half-metre-grid-v2" : "adaptive-area-v1";
+  return `/api/v1/runs/${encodedRunId}/layers/${layer}.png?display_revision=${revision}`;
 }
 
 
@@ -166,6 +196,7 @@ export function flowVectorsGeoJsonUrl(
   timeIndex: number,
   viewport: FlowViewport,
   stride: number,
+  includeField = false,
 ): string {
   const params = new URLSearchParams({
     time_index: String(timeIndex),
@@ -176,10 +207,20 @@ export function flowVectorsGeoJsonUrl(
     north: String(viewport.north),
     stride: String(Math.max(1, Math.trunc(stride))),
   });
+  if (includeField) params.set("include_field", "true");
   return `/api/v1/runs/${encodeURIComponent(runId)}/layers/flow-vectors.geojson?${params.toString()}`;
 }
 
 export type FlowVectorFeatureCollection = {
+  flow_field?: {
+    encoding: "float32-le-uv-base64";
+    width: number;
+    height: number;
+    cell_size_m: number;
+    row_order: "south-to-north";
+    corners: [number[], number[], number[]];
+    data: string;
+  } | null;
   type: "FeatureCollection";
   features: Array<{
     type: "Feature";
@@ -218,9 +259,10 @@ export function getFlowVectors(
   viewport: FlowViewport,
   stride: number,
   signal?: AbortSignal,
+  includeField = false,
 ): Promise<FlowVectorFeatureCollection> {
   return jsonRequest<FlowVectorFeatureCollection>(
-    flowVectorsGeoJsonUrl(runId, timeIndex, viewport, stride),
+    flowVectorsGeoJsonUrl(runId, timeIndex, viewport, stride, includeField),
     { signal },
   );
 }

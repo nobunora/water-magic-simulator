@@ -153,7 +153,7 @@ def flow_vectors_viewport_geojson(
                 valid = (
                     arrays.active_mask[candidate_faces]
                     & np.isfinite(depths)
-                    & (depths >= DISPLAY_DRY_THRESHOLD_M)
+                    & (depths >= getattr(arrays, "display_dry_threshold_m", DISPLAY_DRY_THRESHOLD_M))
                     & np.isfinite(speeds)
                     & (speeds >= min_speed_mps)
                 )
@@ -209,7 +209,7 @@ def flow_vectors_viewport_geojson(
                         r0:r1, c0:c1
                     ]
                     & np.isfinite(depths)
-                    & (depths >= DISPLAY_DRY_THRESHOLD_M)
+                    & (depths >= getattr(arrays, "display_dry_threshold_m", DISPLAY_DRY_THRESHOLD_M))
                     & np.isfinite(speeds)
                     & (speeds >= min_speed_mps)
                 )
@@ -238,7 +238,7 @@ def flow_vectors_viewport_geojson(
             speed = float(np.hypot(u, v))
             if (
                 not np.isfinite(depth)
-                or depth < DISPLAY_DRY_THRESHOLD_M
+                or depth < getattr(arrays, "display_dry_threshold_m", DISPLAY_DRY_THRESHOLD_M)
                 or not np.isfinite(speed)
                 or speed < min_speed_mps
             ):

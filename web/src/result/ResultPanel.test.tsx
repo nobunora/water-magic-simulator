@@ -4,17 +4,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   getFlowVectors,
+  startResultExtrema,
+  getResultExtremaProgress,
+  startResultEnergy,
+  getResultEnergy,
+  getResultEnergyPoint,
   inspectResult,
   type FlowVectorFeatureCollection,
   type ResultMetadataResponse,
 } from "../api/client";
 import ResultPanel, { strideForZoom } from "./ResultPanel";
 
-const resultMapMockState = vi.hoisted(() => ({ reportViewport: true }));
+const completeExtrema = { status: "complete" as const, progress_percent: 100, processed_frames: 4, total_frames: 4 };
+
+const resultMapMockState = vi.hoisted(() => ({ reportViewport: true, captureError: false }));
 
 vi.mock("../api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/client")>();
-  return { ...actual, getFlowVectors: vi.fn(), inspectResult: vi.fn() };
+  return { ...actual, getFlowVectors: vi.fn(), inspectResult: vi.fn(), startResultExtrema: vi.fn(), getResultExtremaProgress: vi.fn(), startResultEnergy: vi.fn(), getResultEnergy: vi.fn(), getResultEnergyPoint: vi.fn() };
 });
 
 vi.mock("./ResultMap", () => ({
@@ -27,6 +34,7 @@ vi.mock("./ResultMap", () => ({
     backgroundOpacity,
     onInspect,
     onViewportChange,
+    onCaptureReady,
   }: {
     mapLabel: string;
     focusPoint?: { lon: number; lat: number } | null;
@@ -36,7 +44,11 @@ vi.mock("./ResultMap", () => ({
     backgroundOpacity: number;
     onInspect: (lon: number, lat: number) => void;
     onViewportChange?: (viewport: { west: number; south: number; east: number; north: number }, zoom: number) => void;
+    onCaptureReady?: (capture: ((url?: string) => Promise<HTMLCanvasElement>) | null) => void;
   }) => {
+    useEffect(() => {
+      if (resultMapMockState.captureError) onCaptureReady?.(async () => { throw new Error("fixture capture failed"); });
+    }, [onCaptureReady]);
     useEffect(() => {
       if (resultMapMockState.reportViewport) {
         onViewportChange?.({ west: 139.7, south: 35.6, east: 139.8, north: 35.7 }, 18);
@@ -150,10 +162,38 @@ describe("ResultPanel", () => {
     expect(strideForZoom(8)).toBe(4096);
   });
 
+  it("does not prefetch unselected static layers or the complete depth timeline", async () => {
+    const fetchSpy = vi.spyOn(window, "fetch").mockResolvedValue(new Response());
+    try {
+      render(<ResultPanel runId="run-1" metadata={metadata} rainfallSummary="10 mm/h" onNewAnalysis={vi.fn()} />);
+      await waitFor(() => expect(screen.getByRole("button", { name: "最大浸水深" })).toHaveAttribute("aria-pressed", "true"));
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("maps late sparse slider positions to retained output indices", () => {
+    render(<ResultPanel runId="run-1" metadata={{ ...metadata, available_time_indices: [0, 3, 3, 99] }} rainfallSummary="10 mm/h" onNewAnalysis={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "時刻別の浸水深" }));
+    expect(screen.getByRole("slider", { name: "結果時刻" })).toHaveAttribute("max", "1");
+    fireEvent.change(screen.getByRole("slider", { name: "結果時刻" }), { target: { value: "1" } });
+    expect(screen.getByTestId("result-map")).toHaveAttribute("data-image-url", "/api/v1/runs/run-1/layers/depth.png?time_index=3&display_revision=adaptive-area-v1");
+  });
+
   beforeEach(() => {
     resultMapMockState.reportViewport = true;
+    resultMapMockState.captureError = false;
     vi.mocked(inspectResult).mockReset();
     vi.mocked(getFlowVectors).mockReset();
+    vi.mocked(startResultExtrema).mockReset();
+    vi.mocked(getResultExtremaProgress).mockReset();
+    vi.mocked(startResultExtrema).mockResolvedValue({ ...completeExtrema, depth: [], speed: [] });
+    vi.mocked(startResultEnergy).mockReset();
+    vi.mocked(getResultEnergy).mockReset();
+    vi.mocked(getResultEnergyPoint).mockReset();
+    vi.mocked(startResultEnergy).mockResolvedValue({status:"complete", progress_percent:100, processed_frames:4, total_frames:4, energy:[], aggregation_buffer_bytes:1920000, method:"境界流出積算"});
+    vi.mocked(getResultEnergyPoint).mockResolvedValue({lon_deg:139.75, lat_deg:35.65, has_data:false, row:0, column:0, cell_area_m2:1, through_time_index:3, through_time_value:metadata.time_values[3]});
     Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
       configurable: true,
       value: vi.fn(),
@@ -164,7 +204,12 @@ describe("ResultPanel", () => {
     });
   });
 
-  it("focuses the global deepest cell and inspects it without changing the current time", async () => {
+  it("cycles ten deepest locations with their output times and reuses the ranking", async () => {
+    const depth = Array.from({ length: 10 }, (_, index) => ({ rank: index + 1, cell_index: index,
+      lon_deg: 139.76 + index * 0.00001, lat_deg: 35.66, time_index: index % 2 === 0 ? 0 : 3,
+      time_value: metadata.time_values[index % 2 === 0 ? 0 : 3], depth_m: 10 - index,
+      speed_mps: 2, cell_area_m2: 0.25 }));
+    vi.mocked(startResultExtrema).mockResolvedValue({ ...completeExtrema, depth, speed: [] });
     vi.mocked(inspectResult).mockResolvedValue({ has_data: false, lon_deg: 139.76, lat_deg: 35.66, row: 0, column: 0 } as Awaited<ReturnType<typeof inspectResult>>);
     render(<ResultPanel runId="run-1" metadata={{ ...metadata, max_depth_summary: { ...metadata.max_depth_summary, global_max_lon_deg: 139.76, global_max_lat_deg: 35.66 } }} rainfallSummary="10 mm/h" onNewAnalysis={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "時刻別の浸水深" }));
@@ -172,16 +217,157 @@ describe("ResultPanel", () => {
     const button = screen.getByRole("button", { name: "最大深度箇所" });
     expect(button.previousElementSibling).toHaveTextContent("時刻別の浸水深");
     fireEvent.click(button);
-    await waitFor(() => expect(inspectResult).toHaveBeenCalledWith("run-1", 139.76, 35.66, 3, expect.any(AbortSignal)));
+    await waitFor(() => expect(inspectResult).toHaveBeenCalledWith("run-1", 139.76, 35.66, 0, expect.any(AbortSignal)));
     expect(screen.getByTestId("result-map")).toHaveAttribute("data-focus-point", JSON.stringify({ lon: 139.76, lat: 35.66 }));
     expect(screen.getByRole("button", { name: "時刻別の浸水深" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(button);
+    expect(screen.getByTestId("point-rank")).toHaveTextContent("第1位 / 10地点");
+    for (let index = 1; index <= 10; index++) {
+      fireEvent.click(button);
+      await waitFor(() => expect(screen.getByTestId("point-rank")).toHaveTextContent(`第${index % 10 + 1}位`));
+      expect(screen.getByTestId("result-map")).toHaveAttribute("data-image-url", expect.stringContaining(`time_index=${index % 2 === 0 ? 0 : 3}`));
+    }
     expect(screen.getByTestId("result-map")).toHaveAttribute("data-focus-point", JSON.stringify({ lon: 139.76, lat: 35.66 }));
+    expect(startResultExtrema).toHaveBeenCalledTimes(1);
   });
 
-  it("disables deepest-cell navigation when coordinates are unavailable", () => {
-    render(<ResultPanel runId="run-1" metadata={metadata} rainfallSummary="10 mm/h" onNewAnalysis={vi.fn()} />);
+  it("disables ranking navigation when output data are unavailable", () => {
+    render(<ResultPanel runId="run-1" metadata={{ ...metadata, available_time_indices: [] }} rainfallSummary="10 mm/h" onNewAnalysis={vi.fn()} />);
     expect(screen.getByRole("button", { name: "最大深度箇所" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "最高速度箇所" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "最高総エネルギー箇所" })).toBeDisabled();
+  });
+
+  it.each(["最大深度", "最高速度"])("shows actual %s progress and shares the completed ranking", async (metric) => {
+    const queued = { status: "queued" as const, progress_percent: 0, processed_frames: 0,
+      total_frames: 8, depth: [], speed: [] };
+    const entry = { rank: 1, cell_index: 1, lon_deg: 139.76, lat_deg: 35.66, time_index: 3,
+      time_value: metadata.time_values[3], depth_m: 1, speed_mps: 2, cell_area_m2: .25 };
+    vi.mocked(startResultExtrema).mockResolvedValue(queued);
+    vi.mocked(getResultExtremaProgress).mockResolvedValueOnce({ ...queued, status: "running", progress_percent: 50, processed_frames: 4 })
+      .mockResolvedValueOnce({ ...queued, status: "complete", progress_percent: 100, processed_frames: 8, depth: [entry], speed: [entry] });
+    vi.mocked(inspectResult).mockResolvedValue({ has_data: false, lon_deg: 139.76, lat_deg: 35.66, row: 0, column: 0 });
+    render(<ResultPanel runId="run-1" metadata={metadata} rainfallSummary="rain" onNewAnalysis={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: `${metric}箇所` }));
+    await screen.findByText(`${metric}集計中 50%（4 / 8 区画×時刻）`);
+    expect(screen.getByRole("progressbar", { name: "水深・流速集計の進捗" })).toHaveAttribute("value", "50");
+    expect(screen.getByRole("button", { name: "最大深度箇所" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "最高速度箇所" })).toBeDisabled();
+    await screen.findByText("最大深度・最高速度集計完了 100%");
+    expect(screen.getByTestId("result-map")).toHaveAttribute("data-image-url", expect.stringContaining("time_index=3"));
+    fireEvent.click(screen.getByRole("button", { name: `${metric === "最大深度" ? "最高速度" : "最大深度"}箇所` }));
+    await waitFor(() => expect(screen.getByTestId("point-rank")).toHaveTextContent(metric === "最大深度" ? "最高流速" : "最高水深"));
+    expect(startResultExtrema).toHaveBeenCalledTimes(1);
+    expect(getResultExtremaProgress).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not report failed extrema jobs as complete and allows retry", async () => {
+    vi.mocked(startResultExtrema).mockResolvedValueOnce({ ...completeExtrema, status: "failed", progress_percent: 50,
+      depth: [], speed: [], error: "水深集計失敗" });
+    render(<ResultPanel runId="run-1" metadata={metadata} rainfallSummary="rain" onNewAnalysis={vi.fn()} />);
+    const button = screen.getByRole("button", { name: "最大深度箇所" });
+    fireEvent.click(button);
+    await screen.findByText("Error: 水深集計失敗");
+    expect(screen.queryByText("最大深度・最高速度集計完了 100%")).not.toBeInTheDocument();
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await screen.findByText("最大深度・最高速度集計完了 100%");
+    expect(startResultExtrema).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows actual energy progress and cycles ten completed locations without recalculating", async () => {
+    const queued = { status: "queued" as const, progress_percent: 0, processed_frames: 0,
+      total_frames: 4, energy: [], aggregation_buffer_bytes: 1920000, method: "境界流出積算" };
+    const energy = Array.from({ length: 10 }, (_, index) => ({ rank: index + 1, cell_index: index,
+      lon_deg: 139.76 + index * .00001, lat_deg: 35.66, time_index: 3, time_value: metadata.time_values[3],
+      depth_m: 0, speed_mps: 0, cell_area_m2: 1, total_outflow_m3: 10, total_energy_j: 70000 - index }));
+    vi.mocked(startResultEnergy).mockResolvedValue(queued);
+    vi.mocked(getResultEnergy).mockResolvedValueOnce({ ...queued, status: "running", progress_percent: 50, processed_frames: 2 })
+      .mockResolvedValueOnce({ ...queued, status: "complete", progress_percent: 100, processed_frames: 4, energy });
+    vi.mocked(inspectResult).mockResolvedValue({ has_data: false, lon_deg: 139.76, lat_deg: 35.66, row: 0, column: 0 });
+    render(<ResultPanel runId="run-1" metadata={metadata} rainfallSummary="rain" onNewAnalysis={vi.fn()} />);
+    const button = screen.getByRole("button", { name: "最高総エネルギー箇所" });
+    fireEvent.click(button);
+    await screen.findByText("エネルギー集計中 50%（2 / 4時刻）");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "50");
+    expect(button).toBeDisabled();
+    await screen.findByText("エネルギー集計完了 100%");
+    expect(screen.getByTestId("point-rank")).toHaveTextContent("最高総エネルギー 第1位 / 10地点");
+    expect(screen.getByRole("region", { name: "比較" })).toHaveTextContent("プリウス（1,400 kg）が時速36.0 km");
+    expect(screen.getByRole("region", { name: "比較" })).toHaveTextContent("累積流出量 10.00 m³");
+    expect(screen.getByTestId("result-map")).toHaveAttribute("data-image-url", expect.stringContaining("time_index=3"));
+    for (let index = 1; index <= 10; index++) {
+      fireEvent.click(button);
+      await waitFor(() => expect(screen.getByTestId("point-rank")).toHaveTextContent(`第${index % 10 + 1}位`));
+    }
+    expect(startResultEnergy).toHaveBeenCalledTimes(1);
+    expect(getResultEnergy).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows energy failures without reporting completion", async () => {
+    const failed = { status: "failed" as const, progress_percent: 33, processed_frames: 1,
+      total_frames: 3, energy: [], aggregation_buffer_bytes: 0, method: "", error: "集計失敗" };
+    vi.mocked(startResultEnergy).mockResolvedValueOnce(failed).mockResolvedValueOnce({ ...failed, status: "running", error: null });
+    render(<ResultPanel runId="run-1" metadata={metadata} rainfallSummary="rain" onNewAnalysis={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "最高総エネルギー箇所" }));
+    await screen.findByText("Error: 集計失敗");
+    expect(screen.queryByText("エネルギー集計完了 100%")).not.toBeInTheDocument();
+  });
+
+  it("compares a clicked location outside the top ten using accumulated energy", async () => {
+    vi.mocked(inspectResult).mockResolvedValue({has_data:true, lon_deg:139.75, lat_deg:35.65, row:1, column:1,
+      depth_m:999, speed_mps:99, grid_resolution_m:.5});
+    vi.mocked(getResultEnergyPoint).mockResolvedValue({has_data:true, lon_deg:139.75, lat_deg:35.65, row:1, column:1, cell_area_m2:1,
+      total_energy_j:75, total_outflow_m3:5, rank:11, through_time_index:3, through_time_value:metadata.time_values[3]});
+    render(<ResultPanel runId="run-1" metadata={metadata} rainfallSummary="rain" onNewAnalysis={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", {name:"地点を確認"}));
+    const comparison = await screen.findByRole("region", {name:"比較"});
+    expect(comparison).toHaveTextContent("力士（150 kg）が秒速1.00 m（100 m走換算: 100.0秒）");
+    expect(comparison).toHaveTextContent("累積流出量 5.00 m³");
+    expect(comparison).toHaveTextContent("総エネルギー 第11位");
+    expect(screen.queryByTestId("point-rank")).not.toBeInTheDocument();
+    expect(startResultExtrema).not.toHaveBeenCalled();
+    expect(getResultEnergyPoint).toHaveBeenCalledWith("run-1", 139.75, 35.65, expect.any(AbortSignal));
+    fireEvent.click(screen.getByRole("button",{name:"時刻別の浸水深"}));
+    fireEvent.click(screen.getByRole("button",{name:"次の時刻"}));
+    await waitFor(() => expect(inspectResult).toHaveBeenLastCalledWith("run-1",139.75,35.65,3,expect.any(AbortSignal)));
+    expect(getResultEnergyPoint).toHaveBeenCalledTimes(1);
+  });
+
+  it("cycles speed independently, shows km/h and small-energy comparison, and clears it on manual inspection", async () => {
+    const entry = { rank: 1, cell_index: 1, lon_deg: 139.76, lat_deg: 35.66, time_index: 3,
+      time_value: metadata.time_values[3], depth_m: 0.6, speed_mps: 1, cell_area_m2: 0.25 };
+    const entries = Array.from({ length: 10 }, (_, index) => ({ ...entry, rank: index + 1, cell_index: index + 1,
+      lon_deg: entry.lon_deg + index * 0.00001, time_index: index % 2 === 0 ? 3 : 0 }));
+    vi.mocked(startResultExtrema).mockResolvedValue({ ...completeExtrema, depth: [entry], speed: entries });
+    vi.mocked(inspectResult).mockResolvedValue({ has_data: false, lon_deg: 139.76, lat_deg: 35.66, row: 0, column: 0 });
+    render(<ResultPanel runId="run-1" metadata={metadata} rainfallSummary="rain" onNewAnalysis={vi.fn()} />);
+    const button = screen.getByRole("button", { name: "最高速度箇所" });
+    for (let index = 0; index <= 10; index++) {
+      fireEvent.click(button);
+      await waitFor(() => expect(screen.getByTestId("point-rank")).toHaveTextContent(`最高流速 第${index % 10 + 1}位`));
+      expect(screen.getByTestId("result-map")).toHaveAttribute("data-image-url", expect.stringContaining(`time_index=${index % 2 === 0 ? 3 : 0}`));
+    }
+    expect(screen.getByRole("region", { name: "比較" })).toHaveTextContent("力士（150 kg）が秒速1.00 m（100 m走換算: 100.0秒）");
+    fireEvent.click(screen.getByRole("button", { name: "最大深度箇所" }));
+    await waitFor(() => expect(screen.getByTestId("point-rank")).toHaveTextContent("最高水深 第1位"));
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByTestId("point-rank")).toHaveTextContent("最高流速 第2位"));
+    expect(startResultExtrema).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "地点を確認" }));
+    expect(screen.queryByTestId("point-rank")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "比較" })).not.toBeInTheDocument();
+  });
+
+  it("allows ranking retries after a failed request", async () => {
+    vi.mocked(startResultExtrema).mockRejectedValueOnce(new Error("ranking failed"));
+    render(<ResultPanel runId="run-1" metadata={metadata} rainfallSummary="rain" onNewAnalysis={vi.fn()} />);
+    const button = screen.getByRole("button", { name: "最高速度箇所" });
+    fireEvent.click(button);
+    await screen.findByText("Error: ranking failed");
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await screen.findByText("流速の順位を表示できる地点がありません。");
+    expect(startResultExtrema).toHaveBeenCalledTimes(2);
   });
 
   it("does not enable flow vectors before the current map zoom is known", () => {
@@ -255,6 +441,20 @@ describe("ResultPanel", () => {
     expect(screen.getByText("現在: 00:01")).toBeVisible();
   });
 
+  it.each([[6, 301, "301秒"], [299, 600, "600秒"], [300, 600, "10分"]] as const)("uses casting duration %s for result units", (casting, total, label) => {
+    render(<ResultPanel runId="run-magic" metadata={{ ...metadata,
+      available_time_indices: [0, 1, 2], time_values: ["0", "6", String(total)],
+      run_summary: { ...metadata.run_summary, rainfall_source: {
+        kind: "water_magic", configuration_json: JSON.stringify({ spell_id:"gw2-healingrain", casting_seconds: casting, relaxation_seconds: total - casting, volume_m3: .039 }),
+      } },
+    }} rainfallSummary="fallback" onNewAnalysis={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "時刻別の浸水深" }));
+    fireEvent.click(screen.getByRole("button", { name: "次の時刻" }));
+    fireEvent.click(screen.getByRole("button", { name: "次の時刻" }));
+    expect(screen.getByText(`現在: ${label}`)).toBeVisible();
+    expect(screen.getByText("緩和中")).toBeVisible();
+  });
+
   it("passes the selected actual output index to native inspection on the time layer", async () => {
     vi.mocked(inspectResult)
       .mockResolvedValueOnce({
@@ -266,6 +466,7 @@ describe("ResultPanel", () => {
       time_index: 0,
       time_value: "2026-01-01T00:00:00",
       depth_m: 0.02,
+      speed_mps: 1,
       max_depth_m: 0.42,
       max_time_index: 3,
       max_time_value: "2026-01-01T00:30:00",
@@ -281,6 +482,7 @@ describe("ResultPanel", () => {
         time_index: 3,
         time_value: "2026-01-01T00:30:00",
         depth_m: 0.12,
+        speed_mps: 2,
         max_depth_m: 0.42,
         max_time_index: 3,
         max_time_value: "2026-01-01T00:30:00",
@@ -300,9 +502,11 @@ describe("ResultPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "時刻別の浸水深" }));
     fireEvent.click(screen.getByRole("button", { name: "地点を確認" }));
 
-    expect(await screen.findByText("0.020 m")).toBeVisible();
+    expect(await screen.findByText("0.02 m")).toBeVisible();
+    expect(screen.getByText("1.00 m/s")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "次の時刻" }));
-    expect(await screen.findByText("0.120 m")).toBeVisible();
+    expect(await screen.findByText("0.12 m")).toBeVisible();
+    expect(screen.getByText("2.00 m/s")).toBeVisible();
     expect(screen.getByText("現在水深")).toBeVisible();
     expect(vi.mocked(inspectResult).mock.calls[1]?.slice(0, 4)).toEqual([
       "run-1",
@@ -451,7 +655,7 @@ describe("ResultPanel", () => {
     expect(screen.getByTestId("result-map")).toHaveTextContent("計算格子解像度の地図");
     expect(screen.getByTestId("result-map")).toHaveAttribute(
       "data-image-url",
-      "/api/v1/runs/run-1/layers/grid-resolution.png?display_revision=adaptive-area-v1",
+      "/api/v1/runs/run-1/layers/grid-resolution.png?display_revision=half-metre-grid-v2",
     );
     expect(screen.getByText("実計算格子: 1 m")).toBeVisible();
     expect(screen.getByText("32 m")).toBeVisible();
@@ -467,7 +671,7 @@ describe("ResultPanel", () => {
     expect(screen.getByText("3.62–4.00 m")).toBeVisible();
   });
 
-  it("selects the center maximum once and updates flow at the selected time", async () => {
+  it.each([false, true])("selects the center maximum and uses the correct flow spacing (magic=%s)", async (magic) => {
     vi.mocked(inspectResult).mockResolvedValue({
       lon_deg: 139.75, lat_deg: 35.65, has_data: true,
       max_time_index: 3, max_time_value: "2026-01-01T00:30:00",
@@ -520,7 +724,9 @@ describe("ResultPanel", () => {
     render(
       <ResultPanel
         runId="run-1"
-        metadata={metadata}
+        metadata={magic ? { ...metadata, run_summary: { ...metadata.run_summary, rainfall_source: {
+          kind: "water_magic", configuration_json: JSON.stringify({ spell_id: "gw2-healingrain", casting_seconds: 6, relaxation_seconds: 60, volume_m3: .117 }),
+        } } } : metadata}
         rainfallSummary="10 mm/h × 1分"
         onNewAnalysis={vi.fn()}
       />,
@@ -528,7 +734,7 @@ describe("ResultPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "流れベクトル" }));
 
-    expect(await screen.findByText("現在: 00:30")).toBeVisible();
+    expect(await screen.findByText(magic ? "現在: 1800秒" : "現在: 00:30")).toBeVisible();
     expect(screen.getByRole("button", { name: "時刻別の浸水深" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("result-map")).toHaveAttribute(
       "data-image-url",
@@ -538,13 +744,14 @@ describe("ResultPanel", () => {
       expect(screen.getByTestId("result-map")).toHaveAttribute("data-flow-arrow-count", "1");
     });
     expect(screen.getByTestId("result-map")).toHaveAttribute("data-flow-time-index", "3");
+    expect(getFlowVectors).toHaveBeenCalledTimes(1); // Paused: no next-frame request.
     expect(screen.getByLabelText("流速の凡例")).toBeVisible();
     expect(screen.getByLabelText("流速の凡例")).toHaveTextContent("0.001");
     expect(screen.getByLabelText("流速の凡例")).toHaveTextContent("m/s");
     expect(screen.getByLabelText("流速の凡例")).toHaveTextContent("3–100 m/s");
     expect(screen.getByLabelText("流速の凡例").querySelectorAll("i")).toHaveLength(7);
     expect(screen.getByText("矢印の向き: 流向 / 色: 流速")).toBeVisible();
-    expect(screen.getByText("GeoJSON矢印: 1本")).toBeVisible();
+    expect(screen.getByText("矢印: 1本")).toBeVisible();
     expect(screen.getByTestId("result-map")).toHaveAttribute("data-flow-display-mode", "vectors");
     expect(vi.mocked(getFlowVectors)).toHaveBeenCalledWith(
       "run-1",
@@ -552,24 +759,30 @@ describe("ResultPanel", () => {
       expect.any(Object),
       6,
       expect.any(AbortSignal),
+      false,
     );
 
     fireEvent.change(screen.getByRole("slider", { name: "結果時刻" }), { target: { value: "0" } });
-    expect(await screen.findByText("現在: 00:00")).toBeVisible();
+    expect(await screen.findByText(magic ? "現在: 0秒" : "現在: 00:00")).toBeVisible();
+    if (magic) {
+      expect(screen.queryByLabelText("ベクトル間隔")).not.toBeInTheDocument();
+      await waitFor(() => expect(getFlowVectors).toHaveBeenCalledWith("run-1", 0, expect.any(Object), 6, expect.any(AbortSignal), false));
+    }
 
     fireEvent.click(screen.getByRole("button", { name: "粒子フロー" }));
     expect(screen.getByRole("button", { name: "粒子フロー" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("現在: 00:00")).toBeVisible();
+    expect(screen.getByText(magic ? "現在: 0秒" : "現在: 00:00")).toBeVisible();
     expect(screen.getByTestId("result-map")).toHaveAttribute("data-flow-display-mode", "particles");
-    expect(screen.getByText("現在: 00:00")).toBeVisible();
+    expect(screen.getByText(magic ? "現在: 0秒" : "現在: 00:00")).toBeVisible();
     expect(screen.getByText(/粒子の進行方向: 補間したベクトル場/)).toBeVisible();
-    expect(screen.getByText(/寿命: 最低5ベクトル間隔/)).toBeVisible();
+    expect(screen.getByText(/寿命: 最低15ベクトル間隔/)).toBeVisible();
     expect(screen.getByText(/開始位相: 4群/)).toBeVisible();
-    expect(screen.getByText("粒子候補: 0個")).toBeVisible();
+    await waitFor(() => expect(getFlowVectors).toHaveBeenCalledWith("run-1", 0, expect.any(Object), 6, expect.any(AbortSignal), true));
+    expect(await screen.findByText("粒子の発生点: 0個")).toBeVisible();
     expect(screen.getByText("この時刻には表示可能な流れがありません。")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "流れベクトル" }));
-    expect(screen.getByText("現在: 00:00")).toBeVisible();
+    expect(screen.getByText(magic ? "現在: 0秒" : "現在: 00:00")).toBeVisible();
 
     fireEvent.change(screen.getByRole("slider", { name: "結果時刻" }), { target: { value: "1" } });
     await waitFor(() => {
@@ -589,6 +802,16 @@ describe("ResultPanel", () => {
     await waitFor(() => expect(getFlowVectors).toHaveBeenCalled());
     expect(screen.getByText("現在: 00:00")).toBeVisible();
     expect(inspectResult).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed GIF frame capture and restores the export control", async () => {
+    resultMapMockState.captureError = true;
+    render(<ResultPanel runId="run-1" metadata={metadata} rainfallSummary="rain" onNewAnalysis={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "時刻別の浸水深" }));
+    fireEvent.click(screen.getByRole("button", { name: "GIF" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("fixture capture failed");
+    expect(screen.getByRole("button", { name: "GIF" })).toBeEnabled();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
   it("keeps layer controls and the timeline inside the fullscreen region", async () => {
@@ -613,7 +836,7 @@ describe("ResultPanel", () => {
       region.querySelectorAll('[aria-label="結果レイヤー"] button'),
       (button) => button.textContent?.trim(),
     );
-    expect(layerButtons).toEqual(["最大浸水深", "時刻別の浸水深", "最大深度箇所", "流れベクトル", "粒子フロー", "計算格子", "標高"]);
+    expect(layerButtons).toEqual(["最大浸水深", "時刻別の浸水深", "最大深度箇所", "最高速度箇所", "最高総エネルギー箇所", "流れベクトル", "粒子フロー", "計算格子", "標高"]);
 
     fireEvent.click(screen.getByRole("button", { name: "地図を全画面表示" }));
     expect(requestFullscreen).toHaveBeenCalledTimes(1);

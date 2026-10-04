@@ -81,7 +81,13 @@ export function encodeGif(width: number, height: number, frames: GifFrame[], loo
     out.push(0);
     const indices = new Uint8Array(width * height);
     for (let p = 0, i = 0; p < indices.length; p += 1, i += 4) {
-      indices[p] = index332(frame.rgba[i], frame.rgba[i + 1], frame.rgba[i + 2]);
+      // GIF has no fractional alpha: composite transparent canvas pixels on white.
+      const alpha = frame.rgba[i + 3] / 255;
+      indices[p] = index332(
+        Math.round(frame.rgba[i] * alpha + 255 * (1 - alpha)),
+        Math.round(frame.rgba[i + 1] * alpha + 255 * (1 - alpha)),
+        Math.round(frame.rgba[i + 2] * alpha + 255 * (1 - alpha)),
+      );
     }
     out.push(8);
     subBlocks(out, lzwLiteralStream(indices));

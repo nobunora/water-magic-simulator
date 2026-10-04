@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import SmokeApp from "./dev/SmokeApp";
 import {
   createElevationPreview,
   createRun,
@@ -120,7 +121,147 @@ const metadata: ResultMetadataResponse = {
 };
 
 describe("local review UI", () => {
+  it("expands the analysis extent with the largest effect dimension and exposes click help", () => {
+    render(<SmokeApp magicMock />);
+    fireEvent.click(screen.getByRole("button", {name:/小学校のプール/}));
+    fireEvent.change(screen.getByLabelText("長さ (m)"), {target:{value:"80"}});
+    expect(screen.getByLabelText("範囲")).toHaveValue("250");
+    fireEvent.change(screen.getByLabelText("範囲"), {target:{value:"100"}});
+    expect(screen.getByLabelText("範囲")).toHaveValue("250");
+    fireEvent.change(screen.getByLabelText("長さ (m)"), {target:{value:"200"}});
+    expect(screen.getByLabelText("長さ (m)")).toHaveValue(166.6);
+    expect(screen.getByLabelText("範囲")).toHaveValue("250");
+    expect(screen.getByRole("button", {name:"解析開始"})).toBeEnabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const explanation = screen.getByLabelText("長さ (m)の説明").closest("details")!;
+    expect(explanation).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByLabelText("長さ (m)の説明"));
+    expect(explanation).toBeInTheDocument();
+  });
+  it("calculates total water from rate and editable duration, preserving an observation override", async () => {
+    render(<SmokeApp magicMock />);
+    fireEvent.change(screen.getByLabelText("1秒あたりの水量 (m³/s)"), {target:{value:"12"}});
+    fireEvent.change(screen.getByLabelText("魔法継続時間 (秒)"), {target:{value:"5"}});
+    expect(screen.getByLabelText("観測時間 (秒)")).toHaveValue(50);
+    fireEvent.change(screen.getByLabelText("観測時間 (秒)"), {target:{value:"20"}});
+    expect(screen.getByText("60.0 m³（12.00 m³/s × 5秒）")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name:"解析開始"}));
+    await waitFor(() => expect(createRun).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createRun).mock.calls[0][0].water_magic).toMatchObject({volume_m3:60,generation_rate_m3ps:12,casting_seconds:5,relaxation_seconds:20,release_mode:"initial"});
+  });
+  it("replaces city samples with magic without submitting uniform-rain runs", async () => {
+    vi.mocked(createRun).mockClear();
+    render(<SmokeApp magicMock />);
+    expect(screen.getByLabelText("範囲")).toHaveValue("100");
+    expect(screen.getByRole("button", { name: /Dragon Quest VII Reimagined.*メイルストロム/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("1秒あたりの水量 (m³/s)")).toHaveValue(625);
+    expect(screen.queryByText("四日市")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "ファイルから読込" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /Water II/ }));
+    expect(screen.getByLabelText("緯度")).toHaveValue("35.681236");
+    expect(screen.getByLabelText("経度")).toHaveValue("139.767125");
+    expect(screen.getByLabelText("緯度")).not.toHaveAttribute("readonly");
+    expect(screen.getByLabelText("経度")).not.toHaveAttribute("readonly");
+    expect(screen.queryByLabelText("配置の緯度")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /GIFを/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "1. 条件" }).compareDocumentPosition(screen.getByRole("heading", { name: "2. 魔法の設定" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("方向 (°)"), { target: { value: "90" } });
+    expect(screen.getByLabelText("方向 (°)")).toHaveValue(90);
+    expect(screen.queryByLabelText("水の配置方法")).not.toBeInTheDocument();
+    expect(screen.getByText("水の配置方法: 開始時に全量を配置")).toBeVisible();
+    expect(screen.getByLabelText("1秒あたりの水量 (m³/s)")).toHaveValue(20);
+    expect(screen.getByText("2.0 mm")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("観測時間 (秒)"), { target: { value: "90" } });
+    expect(screen.getByText("94秒（魔法継続 4秒 + 観測 90秒）")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("魔法継続時間 (秒)"), { target: { value: "0" } });
+    expect(screen.getByLabelText("魔法継続時間 (秒)")).toHaveValue(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const start = screen.getByRole("button", { name: "解析開始" });
+    expect(start).toBeEnabled();
+    expect(createRun).not.toHaveBeenCalled();
+  });
+  it("submits second-based magic independently of rainfall and accepts coordinate edits", async () => {
+    vi.mocked(createRun).mockClear();
+    render(<SmokeApp magicMock />);
+    fireEvent.click(screen.getByRole("button", { name: /Water II/ }));
+    fireEvent.change(screen.getByLabelText("緯度"), { target: { value: "35.700000" } });
+    fireEvent.change(screen.getByLabelText("経度"), { target: { value: "139.800000" } });
+    fireEvent.click(screen.getByRole("button", { name: "解析開始" }));
+    await waitFor(() => expect(createRun).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createRun).mock.calls[0][0]).toMatchObject({
+      requested_accuracy_mode: "full_1m", grid_cell_size_m: 0.5,
+      analysis_area: { width_m: 200, height_m: 200, area_m2: 40000 },
+      water_magic: { position: { lat_deg: 35.7, lon_deg: 139.8 }, casting_seconds: 4, relaxation_seconds: 40, volume_m3: 80, release_mode:"initial", initial_motion:"radial", initial_speed_mps:2 },
+    });
+    expect(vi.mocked(createRun).mock.calls[0][0].rainfall).toBeUndefined();
+  });
+  it("submits directional catalog geometry instead of the previous rain preset", async () => {
+    vi.mocked(createRun).mockClear();
+    render(<SmokeApp magicMock />);
+    fireEvent.click(screen.getByRole("button", {name:/Water II/}));
+    fireEvent.change(screen.getByLabelText("1秒あたりの水量 (m³/s)"), {target:{value:"100"}});
+    fireEvent.click(screen.getByRole("button", {name:/Neuvillette/}));
+    fireEvent.change(screen.getByLabelText("方向 (°)"), {target:{value:"90"}});
+    fireEvent.click(screen.getByRole("button", {name:"解析開始"}));
+    await waitFor(() => expect(createRun).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createRun).mock.calls[0][0].water_magic).toMatchObject({
+      spell_id:"genshin-neuvillette", footprint_kind:"rectangle", length_m:8, width_m:1,
+      volume_m3:60, casting_seconds:3, relaxation_seconds:30, bearing_deg:90, release_mode:"initial", initial_motion:"directional", initial_speed_mps:2,
+    });
+  });
+  it("submits a counterclockwise initial vortex", async () => {
+    render(<SmokeApp magicMock />);
+    expect(screen.getByLabelText("初期運動")).toHaveValue("vortex");
+    expect(screen.getByLabelText("初速 (m/s)")).toHaveValue(2);
+    fireEvent.change(screen.getByLabelText("渦の向き"), {target:{value:"counterclockwise"}});
+    fireEvent.change(screen.getByLabelText("最大流速になる半径 (m)"), {target:{value:"3.5"}});
+    fireEvent.click(screen.getByRole("button", {name:"解析開始"}));
+    await waitFor(() => expect(createRun).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createRun).mock.calls[0][0].water_magic).toMatchObject({
+      release_mode:"initial", initial_motion:"vortex", initial_speed_mps:2,
+      vortex_direction:"counterclockwise", vortex_core_radius_m:3.5,
+    });
+  });
+  it("submits the complete school pool once with no initial velocity", async () => {
+    render(<SmokeApp magicMock />);
+    fireEvent.click(screen.getByRole("button", {name:/小学校のプール/}));
+    expect(screen.getByLabelText("初期運動")).toHaveValue("none");
+    fireEvent.click(screen.getByRole("button", {name:"解析開始"}));
+    await waitFor(() => expect(createRun).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createRun).mock.calls[0][0].water_magic).toMatchObject({
+      spell_id:"school-pool", volume_m3:300, length_m:25, width_m:12,
+      release_mode:"initial", initial_motion:"none", initial_speed_mps:0,
+    });
+  });
+  it("fixes new analyses to initial water without a placement selector", async () => {
+    render(<SmokeApp magicMock />);
+    expect(screen.queryByLabelText("水の配置方法")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("初期運動")).toHaveValue("vortex");
+    expect(screen.getByLabelText("魔法継続時間 (秒)")).toHaveValue(4);
+    expect(screen.getByRole("button", {name:"解析開始"})).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", {name:"解析開始"}));
+    await waitFor(() => expect(createRun).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createRun).mock.calls[0][0].water_magic?.release_mode).toBe("initial");
+  });
+  it("preserves old continuous results and defaults their next analysis to stationary initial placement", async () => {
+    window.localStorage.setItem("urban-pluvial-flood-simulator.active-run-id.water-magic-mock", "00000000-0000-0000-0000-000000000001");
+    vi.mocked(getResultMetadata).mockResolvedValue({...metadata, run_summary:{...metadata.run_summary,
+      rainfall_source:{kind:"water_magic", configuration_json:JSON.stringify({
+        spell_id:"dq7-maelstrom", footprint_kind:"circle", position:{lon_deg:139.767125,lat_deg:35.681236},
+        volume_m3:2500, radius_m:20, bearing_deg:0, casting_seconds:4, relaxation_seconds:60,
+      })},
+    }});
+    render(<SmokeApp magicMock />);
+    await screen.findByRole("heading", {name:"解析結果"});
+    expect(screen.getByText(/メイルストロム.*発動 4秒/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", {name:"新しい解析"}));
+    expect(screen.queryByLabelText("水の配置方法")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("初期運動")).toHaveValue("none");
+    expect(screen.queryByLabelText("初速 (m/s)")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name:"解析開始"})).toBeEnabled();
+  });
   beforeEach(() => {
+    vi.mocked(createRun).mockClear();
     window.localStorage.clear();
     vi.mocked(getAppConfig).mockResolvedValue({
       mode: "local",

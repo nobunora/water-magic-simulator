@@ -1,4 +1,25 @@
-# Urban Pluvial Flood Simulator
+# Water Magic Simulator
+
+Simulate water magic on real Japanese terrain with SFINCS: place a spell, set its water volume, footprint and initial motion, then inspect water depth, velocity and flow over time.
+
+[日本語ガイド](README.ja.md) · [Implementation and validation](docs/specs/water-magic-implementation.md) · [Initial water and momentum](docs/specs/water-magic-initial-momentum.md)
+
+## Water magic workflow
+
+1. Start the local review application using the canonical environment described below.
+2. Open `/?mode=water-magic` on the launcher's local URL.
+3. Choose a location and a spell or comparison scenario. Adjust its water volume, dimensions, direction, initial velocity and observation time.
+4. Run the simulation and inspect depth, native flow vectors, particles and timeline results. Save and reopen runs using ZIP archives.
+
+The water magic variant uses native 0.5 m hydraulic cells. It supports initial water placement and continued water supply; existing rainfall runs and 1 m archives retain their compatibility behavior. Game and kaiju quantities are estimated scenario inputs, not official measurements. The model approximates ground-level water motion; it does not simulate combat effects, creature motion or structural destruction. Adaptive grids remain disabled.
+
+## Repository relationship
+
+This is an independent repository derived from [Urban Pluvial Flood Simulator](https://github.com/nobunora/urban-pluvial-flood-simulator), preserving its Git history. It is a source-derived fork, not a GitHub fork-network repository. The original repository remains the rainfall simulator; water magic development is published here.
+
+The preserved upstream baseline is `3fea888773575b288033faa2f67e12ee645609cb` (`baseline/main-before-water-magic-2026-10-02`). Earlier documents describing only a local branch/worktree record the state before this repository was separated on 2026-10-04.
+
+## Inherited rainfall simulator documentation
 
 A compact **Rain-on-Grid urban pluvial flood simulator** with automatic Japanese terrain and urban-data preparation.
 

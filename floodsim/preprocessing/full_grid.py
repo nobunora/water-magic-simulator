@@ -205,10 +205,11 @@ def build_full_1m_grid(
     progress_callback: Callable[[float, str], None] | None = None,
 ) -> FullGridProduct:
     """Create uniform hydraulic arrays required by the SFINCS builder."""
-    if grid_m not in {1.0, 2.0, 4.0}:
-        raise ValueError("uniform grid size must be 1, 2, or 4 metres")
+    if grid_m not in {0.5, 1.0, 2.0, 4.0}:
+        raise ValueError("uniform grid size must be 0.5, 1, 2, or 4 metres")
     width = _cell_count(area.width_m, grid_m)
     height = _cell_count(area.height_m, grid_m)
+    grid_label = "Full 1 m" if grid_m == 1 else f"均一 {grid_m:g} m"
     if progress_callback is not None:
         progress_callback(0.0, f"均一 {grid_m:g} m 前処理 0/3 完了 / 残り3処理")
 
@@ -250,7 +251,7 @@ def build_full_1m_grid(
             if progress_callback is not None:
                 progress_callback(
                     0.15 * done_count,
-                    f"Full 1 m前処理 {done_count}/3 完了（{label_name}） / 残り{3 - done_count}処理",
+                    f"{grid_label}前処理 {done_count}/3 完了（{label_name}） / 残り{3 - done_count}処理",
                 )
 
     terrain = completed["地形"]
@@ -317,7 +318,7 @@ def build_full_1m_grid(
         progress_callback=roof_progress,
     )
     if progress_callback is not None:
-        progress_callback(1.0, "Full 1 m格子・建物マスク・粗度の構築完了")
+        progress_callback(1.0, f"{grid_label}格子・建物マスク・粗度の構築完了")
     crs = local_crs(area)
     return FullGridProduct(
         elevation_m=terrain,
